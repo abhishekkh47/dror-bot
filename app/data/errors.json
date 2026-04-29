@@ -1,0 +1,181 @@
+{
+    "categories": {
+      "AUTH": "Authentication & authorization issues",
+      "PAYMENT": "Transaction execution failures",
+      "VALIDATION": "Input or format validation errors",
+      "BUSINESS": "Business logic / entity issues",
+      "SYSTEM": "Internal or unknown system failures"
+    },
+    "errors": [
+      {
+        "error_key": "insufficientFunds",
+        "message": "Insufficient funds",
+        "category": "PAYMENT",
+        "signals": ["payment failed", "not enough balance", "insufficient funds"],
+        "explanation": "Sender wallet balance is less than required transaction amount",
+        "check_steps": ["Check wallet balance", "Verify transaction amount"],
+        "resolution": ["Ask user to add funds", "Retry transaction"],
+        "confidence_weight": 0.9
+      },
+      {
+        "error_key": "walletNotFound",
+        "message": "Wallet not found",
+        "category": "BUSINESS",
+        "signals": ["wallet missing", "wallet not found"],
+        "explanation": "Wallet does not exist for given user or business",
+        "check_steps": ["Verify user onboarding", "Check wallet creation"],
+        "resolution": ["Create wallet", "Ensure proper onboarding"],
+        "confidence_weight": 0.85
+      },
+      {
+        "error_key": "oneOrBothWalletInactive",
+        "message": "One or both wallets are inactive",
+        "category": "PAYMENT",
+        "signals": ["wallet inactive", "account inactive"],
+        "explanation": "One or both wallets are inactive and cannot process transactions",
+        "check_steps": ["Check wallet status", "Verify KYC"],
+        "resolution": ["Activate wallet", "Complete KYC"],
+        "confidence_weight": 0.8
+      },
+      {
+        "error_key": "transactionFailed",
+        "message": "Transaction failed",
+        "category": "PAYMENT",
+        "signals": ["payment failed", "transaction failed"],
+        "explanation": "Generic transaction failure due to system or rule violation",
+        "check_steps": ["Check logs/webhook", "Verify inputs"],
+        "resolution": ["Retry transaction", "Inspect failure reason"],
+        "confidence_weight": 0.6
+      },
+      {
+        "error_key": "transactionNotFound",
+        "message": "Transaction not found",
+        "category": "BUSINESS",
+        "signals": ["transaction not found", "invalid transaction id"],
+        "explanation": "Transaction ID does not exist",
+        "check_steps": ["Verify transaction ID", "Check intent creation"],
+        "resolution": ["Use correct ID", "Store ID properly"],
+        "confidence_weight": 0.85
+      },
+      {
+        "error_key": "platformNotFound",
+        "message": "Platform not found",
+        "category": "AUTH",
+        "signals": ["platform not found", "invalid platform"],
+        "explanation": "Platform ID is invalid or does not exist",
+        "check_steps": ["Verify platform ID", "Check registration"],
+        "resolution": ["Use valid platform ID"],
+        "confidence_weight": 0.9
+      },
+      {
+        "error_key": "platformSecretNotMatch",
+        "message": "Invalid platform authentication details",
+        "category": "AUTH",
+        "signals": ["invalid platform secret", "authentication failed"],
+        "explanation": "Provided platform secret is incorrect",
+        "check_steps": ["Verify secret", "Check headers"],
+        "resolution": ["Use correct secret", "Regenerate secret"],
+        "confidence_weight": 0.95
+      },
+      {
+        "error_key": "tokenExpired",
+        "message": "Token has expired",
+        "category": "AUTH",
+        "signals": ["token expired", "invalid token"],
+        "explanation": "Authentication token is expired or invalid",
+        "check_steps": ["Check token expiry"],
+        "resolution": ["Refresh token", "Re-authenticate"],
+        "confidence_weight": 0.9
+      },
+      {
+        "error_key": "invalidCredentials",
+        "message": "Invalid credentials",
+        "category": "AUTH",
+        "signals": ["login failed", "wrong password"],
+        "explanation": "Incorrect login credentials",
+        "check_steps": ["Verify email/phone", "Check password"],
+        "resolution": ["Reset password", "Retry login"],
+        "confidence_weight": 0.85
+      },
+      {
+        "error_key": "receiverNotFound",
+        "message": "Receiver not found",
+        "category": "BUSINESS",
+        "signals": ["receiver not found"],
+        "explanation": "Receiver does not exist or is invalid",
+        "check_steps": ["Verify receiver ID"],
+        "resolution": ["Use valid receiver ID"],
+        "confidence_weight": 0.85
+      },
+      {
+        "error_key": "businessNotFound",
+        "message": "Business not found",
+        "category": "BUSINESS",
+        "signals": ["business not found"],
+        "explanation": "Business entity does not exist",
+        "check_steps": ["Verify business ID"],
+        "resolution": ["Create or use correct business"],
+        "confidence_weight": 0.8
+      },
+      {
+        "error_key": "internalError",
+        "message": "Internal server error",
+        "category": "SYSTEM",
+        "signals": ["internal server error", "something went wrong"],
+        "explanation": "Unexpected backend failure",
+        "check_steps": ["Check logs", "Retry request"],
+        "resolution": ["Retry", "Contact support"],
+        "confidence_weight": 0.3
+      }, 
+      {
+        "error_key": "transactionAlreadyCompleted",
+        "message": "Transaction already completed",
+        "category": "PAYMENT",
+        "signals": ["already completed", "duplicate payment"],
+        "explanation": "Transaction has already been processed",
+        "check_steps": ["Check transaction status"],
+        "resolution": ["Avoid duplicate requests"],
+        "confidence_weight": 0.9
+      },
+      {
+        "error_key": "transactionAlreadyCancelled",
+        "message": "Transaction already cancelled",
+        "category": "PAYMENT",
+        "signals": ["already cancelled"],
+        "explanation": "Transaction was previously cancelled",
+        "check_steps": ["Verify transaction state"],
+        "resolution": ["Create new transaction"],
+        "confidence_weight": 0.85
+      },
+      {
+        "error_key": "oneOrMoreReceiverWalletsNotFound",
+        "message": "Receiver wallets not found",
+        "category": "PAYMENT",
+        "signals": ["receiver wallet not found"],
+        "explanation": "Receiver wallet does not exist",
+        "check_steps": ["Verify receiver wallet"],
+        "resolution": ["Ensure receiver onboarding"],
+        "confidence_weight": 0.85
+      },
+      {
+        "error_key": "paymentMethodNotFound",
+        "message": "Payment method not found",
+        "category": "PAYMENT",
+        "signals": ["payment method missing"],
+        "explanation": "Specified payment method does not exist",
+        "check_steps": ["Verify payment method ID"],
+        "resolution": ["Use valid payment method"],
+        "confidence_weight": 0.8
+      },
+      {
+        "error_key": "transactionManualReview",
+        "message": "Transaction requires manual review",
+        "category": "PAYMENT",
+        "signals": ["manual review", "compliance check"],
+        "explanation": "Transaction flagged for compliance review",
+        "check_steps": ["Check compliance status"],
+        "resolution": ["Wait for approval", "Contact support"],
+        "confidence_weight": 0.7
+      }
+    ]
+  }
