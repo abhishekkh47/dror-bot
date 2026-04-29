@@ -15,19 +15,20 @@ class FlowEngine:
     def get_current_step(self, session_id: str) -> Step:
         session = self.session_store.get(session_id)
         flow = self.flow_loader.get_flow(session.flow_id)
-        return next(step for step in flow.steps if step.id == session.current_step)
+        return flow.get_step(session.current_step)
     
     def process_input(self, session_id: str, user_input: str) -> Step:
         session = self.session_store.get(session_id)
         flow = self.flow_loader.get_flow(session.flow_id)
 
-        current_step = next(step for step in flow.steps if step.id == session.current_step)
+        current_step = flow.get_step(session.current_step)
 
         if current_step.type == 'DECISION':
-            if user_input not in current_step.options:
+            normalized_input = self.normalize_input(user_input)
+            if normalized_input not in current_step.options:
                 raise Exception("Invalid Option")
             
-            next_step_id = current_step.next[user_input]
+            next_step_id = current_step.next[normalized_input]
         else:
             next_step_id = current_step.next
         
@@ -38,4 +39,7 @@ class FlowEngine:
         session.current_step = next_step_id
 
         self.session_store.update(session)
-        return next(step for step in flow.steps if step.id == next_step_id)
+        return flow.get_step(next_step_id)
+    
+    def normalize_input(self, user_input: str) -> str:
+        return user_input.lower().strip()

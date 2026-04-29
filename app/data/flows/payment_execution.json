@@ -95,13 +95,15 @@
         "id": "end_success",
         "type": "INFO",
         "title": "End Success",
-        "description": "Payment flow completed successfully"
+        "description": "Payment flow completed successfully",
+        "next": null
       },
       {
         "id": "end_failure",
         "type": "INFO",
         "title": "End Failure",
-        "description": "Payment flow ended with a failure"
+        "description": "Payment flow ended with a failure",
+        "next": null
       }
     ]
   }
