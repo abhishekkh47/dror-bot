@@ -1,4 +1,3 @@
-from app.core.llm.embedding import get_embedding
 from app.core.llm.retriever import retrieve_context, store
 from app.core.llm.prompt import build_prompt, build_prompt_with_step
 from app.core.llm.llm import generate_response
@@ -19,60 +18,79 @@ def handle_out_of_scope(query: str, step):
     Ask a question related to this step or move to the appropriate step.
     """.strip()
 
+# Detect intent mismatch
+def is_query_related_to_step(scored_chunks, step, threshold=0.55):
+    """
+    Check if any of the top chunks relevant to this step
+    have sufficient similarity score
+    """
+
+    # Check if any top chunk belongs to this step's domain
+    for score, chunk in scored_chunks:
+        if chunk["topic"].startswith(step.rag_topic.split("_")[0]):
+            if score >= threshold:
+                return True
+
+    return False
+
+def is_chunk_relevant(chunk, step):
+    step_tokens = step.rag_topic.split("_")
+    chunk_tags = chunk.get("tags", [])
+
+    # tag-based relevance (primary)
+    overlap = sum(1 for t in step_tokens if t in chunk_tags)
+
+    if overlap >= 1:
+        return True
+
+    # fallback: topic prefix (secondary)
+    step_prefix = step_tokens[0]
+    return chunk["topic"].startswith(step_prefix)
+
 def ask_with_context(query: str, step):
+    """
+    Here we will use store.search to get the top 8 chunks and then filter them based on the step.rag_topic
+    This is similar to retrieve data from cache
+    recompute embedding -> slow, redundant
+    reuse stored vectors -> fast, clean
+    We will use a 3-layer filter to get the most relevant chunks
+    1. topic partial match
+    2. Tag overlap
+    3. Soft fallback
+    4. Similarity threshold
+    5. Build context
+    6. Build prompt
+    7. Generate response
+    """
     # 1. retrieve candidates
-    context_chunks = store.search(query)
+    scored_chunks = store.search(query, top_k=8)
 
-    def is_relevant(chunk, step):
-        # 1. topic partial match
-        if step.rag_topic in chunk["topic"]:
-            return True
-        
-        # 2. Tag overlap
-        step_tokens = step.rag_topic.split("_")
-        chunk_tags = chunk.get("tags", [])
-
-        if any(token in chunk_tags for token in step_tokens):
-            return True
-        return False
-
-    # 2. strict topic filter
     filtered = [
-        c for c in context_chunks if is_relevant(c, step)
+        (score, chunk)
+        for score, chunk in scored_chunks
+        if is_chunk_relevant(chunk, step)
     ]
 
     # 3. enforce boundary
     if not filtered: 
         # return handle_out_of_scope(query, step)
         # Add soft fallback instead -> this prevents total failure
-        filtered = context_chunks[:2]
+        if not is_query_related_to_step(scored_chunks, step):
+            return handle_out_of_scope(query, step)
+        
+        # allow soft fallback only if query is related to step
+        filtered = scored_chunks[:2]
     
-    if not filtered:
+    # use score directly 
+    top_score = filtered[0][0]
+    
+    if top_score < 0.6:
         return handle_out_of_scope(query, step)
     
-    # if similarity too low -> reject
-    query_vec = np.array(get_embedding(query))
-    top_chunk_vec = np.array(get_embedding(filtered[0]["content"]))
-
-    top_score = store.cosine_similarity(query_vec, top_chunk_vec)
-    
-    if top_score < 0.5:
-        return handle_out_of_scope(query, step)
-    
-    # context = retrieve_context(
-    #     query=query,
-    #     rag_topic=step.rag_topic
-    # )
-
-    #👉 retrieve_context was doing too much implicitly:
-    # search
-    # filtering
-    # fallback
-
     # 4. Build context
     context = "\n\n".join([
-        f"[{c['topic']}]\n{c['content']}"
-        for c in filtered
+        f"[{chunk['topic']}]\n{chunk['content']}"
+        for score, chunk in filtered
     ])
 
     prompt = build_prompt_with_step(

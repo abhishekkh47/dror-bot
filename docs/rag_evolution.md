@@ -4,6 +4,32 @@ Tracks how the RAG pipeline evolved — what each approach did, what broke, and 
 
 ---
 
+## Approach 4.1: Test results — blind fallback defeats flow control (current, uncommitted)
+
+**Test results:**
+
+| Case | Step | Query | Expected | Actual | Pass? |
+|------|------|-------|----------|--------|-------|
+| 1 | `check_intent_response` | "what headers are required?" | API-level answer | Returned correct headers | Yes |
+| 2 | `evaluate_status` | "what headers are required?" | Should NOT give API details | Returned API headers anyway | **No** |
+| 3 | `check_intent_response` | "what happens if payment fails?" | Failure at creation | Returned auto-cancel/failure info | Yes |
+
+**What broke:** Case 2 still returns API header details even though the user is on `evaluate_status`, which has nothing to do with headers.
+
+**Root cause:** The blind soft fallback `filtered = context_chunks[:2]` reintroduces the exact problem we were trying to solve. When the relevance filter correctly identifies that "what headers are required?" has no matching chunks for `evaluate_status`, the fallback says "just use the top 2 embedding results anyway" — which are the API header chunks. This cancels the entire flow-scoping layer.
+
+The similarity threshold (0.5) doesn't help here because the query IS semantically similar to the header chunks — it's just not relevant to the *current step*. The problem isn't similarity, it's **scope**. Embedding similarity alone can't enforce step boundaries.
+
+**Key insight:** The system can't distinguish between:
+- Query is relevant to this step but the filter missed it (should fallback)
+- Query is truly out-of-scope for this step (should block)
+
+**Next step needed:** 
+- Conditional fallback that checks whether the fallback chunks are actually related to the current step before allowing them through.
+- ❌ filtering-based RAG ➡️ scoring-based RAG ✅
+
+---
+
 ## Approach 4: Hybrid topic + tag + similarity filtering with soft fallback
 
 **What:** Replaced the strict `topic == rag_topic` equality check with a three-layer relevance filter: (1) partial topic match — `step.rag_topic in chunk.topic`, (2) tag overlap — tokenize `rag_topic` by underscores and check if any token appears in the chunk's tags, (3) soft fallback — if no chunks pass the filter, take the top 2 most similar candidates from the embedding search instead of immediately returning out-of-scope. Added a similarity threshold guard: if the best chunk's cosine similarity to the query is below 0.5, reject with out-of-scope.
@@ -16,23 +42,13 @@ Tracks how the RAG pipeline evolved — what each approach did, what broke, and 
 
 **Why this over Approach 3:** Approach 3 used exact equality (`chunk.topic == step.rag_topic`) which was over-corrected. The `rag_topic` values in the flow (e.g. `create_intent_response_handling`) never matched the chunk `topic` values (e.g. `create_intent_api`) because they were semantically related but not identical strings. Result: all 3 test cases returned "This question is not relevant" — even when they were relevant. Went from too-loose (Approach 2) to too-strict (Approach 3).
 
-**Result:** Relevant questions now get answers again. The partial match and tag overlap catch chunks that are related but not identically named. The soft fallback prevents total failure when the filter is still too narrow. The similarity threshold prevents truly irrelevant chunks from being used even in fallback.
+**Result:** Cases 1 and 3 now return relevant answers. The partial match and tag overlap catch chunks that are related but not identically named.
 
 **Limitations:**
-- Partial match is substring-based (`step.rag_topic in chunk.topic`) — can produce false positives (e.g. `"intent"` matching `"create_intent_api"` and `"intent_error_handling"`)
-- Tag overlap tokenizes by underscore which is fragile — depends on consistent naming conventions between flow steps and chunk tags
-- Similarity threshold (0.5) is a magic number — not tuned, may reject valid chunks or allow bad ones
-- Re-embedding the query and top chunk for threshold check adds latency (two extra embedding calls per request)
-
-**Learining outcomes:**
-- Bad systems use:
-❌ exact match
-❌ blind fallback
-
-- Good systems use:
-✅ layered filtering
-✅ semantic matching
-✅ controlled fallback
+- Blind fallback (`context_chunks[:2]`) defeats flow control — any query gets answered regardless of step relevance
+- Similarity threshold (0.5) doesn't help because the issue is scope, not similarity
+- Partial match is substring-based — can produce false positives
+- Tag overlap tokenizes by underscore which is fragile
 
 ---
 

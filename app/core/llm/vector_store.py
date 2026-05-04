@@ -14,6 +14,7 @@ class VectorStore:
         
         self.vectors = []
         self._build_index()
+        self.build_topic_index()
 
     def _build_index(self):
         for chunk in self.chunks:
@@ -67,4 +68,15 @@ class VectorStore:
 
         scored.sort(key=lambda x: x[0], reverse=True)
 
-        return [chunk for _, chunk in scored[:top_k]]
+        # return [chunk for _, chunk in scored[:top_k]]
+
+        # return score + chunk:
+        return scored[:top_k]
+    
+    # Pre-compute topic embeddings
+    def build_topic_index(self):
+        self.topic_embeddings = {}
+        topics = set(chunk["topic"] for chunk in self.chunks)
+
+        for topic in topics:
+            self.topic_embeddings[topic] = np.array(get_embedding(topic))
