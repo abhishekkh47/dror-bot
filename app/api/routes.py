@@ -2,6 +2,7 @@ from fastapi import APIRouter
 from app.core.flow_engine import FlowEngine
 from app.core.flow_loader import FlowLoader
 from app.core.session_store import SessionStore
+from app.core.llm.rag_pipeline import ask_with_context
 
 router = APIRouter()
 
@@ -21,6 +22,12 @@ def start_flow(flow_id: str):
 def process_input(session_id: str, user_input: str):
     try:
         step = engine.process_input(session_id, user_input)
-        return { "step": step }
+
+        response = ask_with_context(
+            query=user_input,
+            step=step
+        )
+
+        return { "step": step, "response": response }
     except Exception as e:
         return { "error": str(e) }

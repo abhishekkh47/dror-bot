@@ -1,4 +1,4 @@
 /drorenv
-/docs
+# /docs
 .env
 *.pyc

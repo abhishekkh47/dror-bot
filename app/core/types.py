@@ -1,4 +1,4 @@
-from typing import List, Dict, Optional, Union
+from typing import List, Dict, Optional, Union, ClassVar, Set
 from pydantic import BaseModel, PrivateAttr
 
 class Step(BaseModel):
@@ -7,6 +7,7 @@ class Step(BaseModel):
     title: str
     description: Optional[str] = None
     options: Optional[List[str]] = None
+    rag_topic: Optional[str] = None
     next: Optional[Union[str, Dict[str, str]]] = None
 
 class Flow(BaseModel):
@@ -76,8 +77,8 @@ class Flow(BaseModel):
         self._step_map = {step.id: step for step in self.steps}
         self._validate_next_references()
     
-    VALID_TYPES = {"ACTION", "INFO", "DECISION"}
-    TERMINAL_STEPS = {"end_success", "end_failure"}
+    VALID_TYPES: ClassVar[Set[str]] = {"INFO", "DECISION", "ACTION"}
+    TERMINAL_STEPS: ClassVar[Set[str]] = {"end_success", "end_failure"}
 
     def _validate_next_references(self) -> None:
         for step in self.steps:
