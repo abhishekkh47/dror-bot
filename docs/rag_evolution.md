@@ -4,6 +4,38 @@ Tracks how the RAG pipeline evolved — what each approach did, what broke, and 
 
 ---
 
+## Approach 4: Hybrid topic + tag + similarity filtering with soft fallback
+
+**What:** Replaced the strict `topic == rag_topic` equality check with a three-layer relevance filter: (1) partial topic match — `step.rag_topic in chunk.topic`, (2) tag overlap — tokenize `rag_topic` by underscores and check if any token appears in the chunk's tags, (3) soft fallback — if no chunks pass the filter, take the top 2 most similar candidates from the embedding search instead of immediately returning out-of-scope. Added a similarity threshold guard: if the best chunk's cosine similarity to the query is below 0.5, reject with out-of-scope.
+
+**Key changes:**
+- `is_relevant(chunk, step)` function in `rag_pipeline.py` — partial topic match + tag overlap
+- Soft fallback: `filtered = context_chunks[:2]` when filter returns empty, preventing total failure
+- Similarity threshold: re-embeds query and top chunk, rejects if cosine similarity < 0.5
+- `handle_out_of_scope()` still used as final safety net
+
+**Why this over Approach 3:** Approach 3 used exact equality (`chunk.topic == step.rag_topic`) which was over-corrected. The `rag_topic` values in the flow (e.g. `create_intent_response_handling`) never matched the chunk `topic` values (e.g. `create_intent_api`) because they were semantically related but not identical strings. Result: all 3 test cases returned "This question is not relevant" — even when they were relevant. Went from too-loose (Approach 2) to too-strict (Approach 3).
+
+**Result:** Relevant questions now get answers again. The partial match and tag overlap catch chunks that are related but not identically named. The soft fallback prevents total failure when the filter is still too narrow. The similarity threshold prevents truly irrelevant chunks from being used even in fallback.
+
+**Limitations:**
+- Partial match is substring-based (`step.rag_topic in chunk.topic`) — can produce false positives (e.g. `"intent"` matching `"create_intent_api"` and `"intent_error_handling"`)
+- Tag overlap tokenizes by underscore which is fragile — depends on consistent naming conventions between flow steps and chunk tags
+- Similarity threshold (0.5) is a magic number — not tuned, may reject valid chunks or allow bad ones
+- Re-embedding the query and top chunk for threshold check adds latency (two extra embedding calls per request)
+
+**Learining outcomes:**
+- Bad systems use:
+❌ exact match
+❌ blind fallback
+
+- Good systems use:
+✅ layered filtering
+✅ semantic matching
+✅ controlled fallback
+
+---
+
 ## Approach 3: Step-scoped retrieval with strict topic equality
 
 **What:** Instead of blindly returning top-k results, retrieval was scoped to the current flow step. Each step in `payment_execution.json` has a `rag_topic` field. After embedding search returned candidates, they were filtered by `chunk.topic == step.rag_topic`. If no chunks matched, the system returned an explicit out-of-scope message instead of hallucinating.
