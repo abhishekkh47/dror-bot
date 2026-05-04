@@ -6,6 +6,7 @@
         "type": "ACTION",
         "title": "Create Payment Intent",
         "description": "Initialize a new payment intent with the payment provider",
+        "rag_topic": "create_payment_intent_api",
         "next": "check_intent_response"
       },
       {
@@ -13,6 +14,7 @@
         "type": "DECISION",
         "title": "Check Intent Response",
         "description": "Evaluate whether the payment intent was created successfully",
+        "rag_topic": "create_intent_response_handling",
         "options": ["success", "failure"],
         "next": {
           "success": "store_transaction_id",
@@ -24,6 +26,7 @@
         "type": "INFO",
         "title": "Handle Intent Error",
         "description": "Log and surface the error from the failed intent creation",
+        "rag_topic": "create_intent_error_scenarios",
         "next": "end_failure"
       },
       {
@@ -31,6 +34,7 @@
         "type": "ACTION",
         "title": "Store Transaction ID",
         "description": "Persist the transaction ID returned by the payment provider",
+        "rag_topic": "platform_transaction_id_storage",
         "next": "system_auto_processing"
       },
       {
@@ -38,6 +42,7 @@
         "type": "INFO",
         "title": "System Auto Processing",
         "description": "Payment provider is processing the transaction asynchronously",
+        "rag_topic": "auto_completion_lifecycle",
         "next": "receive_update"
       },
       {
@@ -45,6 +50,7 @@
         "type": "ACTION",
         "title": "Receive Update",
         "description": "Receive a status update callback from the payment provider",
+        "rag_topic": "payment_status_update_mechanisms",
         "next": "evaluate_status"
       },
       {
@@ -52,6 +58,7 @@
         "type": "DECISION",
         "title": "Evaluate Status",
         "description": "Determine the outcome of the payment based on the provider update",
+        "rag_topic": "payment_status_evaluation",
         "options": ["completed", "failed", "cancelled"],
         "next": {
           "completed": "handle_success",
@@ -64,6 +71,7 @@
         "type": "ACTION",
         "title": "Handle Success",
         "description": "Process a successfully completed payment",
+        "rag_topic": "payment_completion_success",
         "next": "check_needs_refund"
       },
       {
@@ -71,6 +79,7 @@
         "type": "ACTION",
         "title": "Handle Failure",
         "description": "Process a failed payment and notify relevant parties",
+        "rag_topic": "payment_completion_failure",
         "next": "end_failure"
       },
       {
@@ -78,6 +87,7 @@
         "type": "ACTION",
         "title": "Handle Cancellation",
         "description": "Process a cancelled payment and perform cleanup",
+        "rag_topic": "payment_cancellation_handling",
         "next": "end_failure"
       },
       {
@@ -85,6 +95,7 @@
         "type": "DECISION",
         "title": "Check Needs Refund",
         "description": "Determine if a refund is required after successful payment",
+        "rag_topic": "post_payment_refund_check",
         "options": ["yes", "no"],
         "next": {
           "yes": "end_success",
@@ -96,6 +107,7 @@
         "type": "INFO",
         "title": "End Success",
         "description": "Payment flow completed successfully",
+        "rag_topic": "payment_flow_terminal_states",
         "next": null
       },
       {
@@ -103,6 +115,7 @@
         "type": "INFO",
         "title": "End Failure",
         "description": "Payment flow ended with a failure",
+        "rag_topic": "payment_flow_terminal_states",
         "next": null
       }
     ]
