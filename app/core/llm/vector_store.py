@@ -1,6 +1,7 @@
 import json
 import numpy as np
 from app.core.llm.embedding import get_embedding
+from app.utils.constants import CONTEXT_TAGS, CRITICAL_TAGS, TAG_PRIORITY
 
 class VectorStore:
     def __init__(self, path: str):
@@ -35,11 +36,22 @@ class VectorStore:
 
     def cosine_similarity(self, a, b):
         return np.dot(a,b) / (np.linalg.norm(a) * np.linalg.norm(b))
+
+    def normalize_token(self,token: str):
+        mapping = {
+            "fails": "failure",
+            "failed": "failure",
+            "error": "failure",
+            "errors": "failure",
+            "success": "success",
+            "succeeded": "success"
+        }
+        return mapping.get(token, token)
     
     # More candidates (top_k) → better chance correct chunk appears
     def search(self, query: str, step=None, top_k=8):
         query_vec = np.array(get_embedding(query))
-        query_tokens = set(query.lower().split())
+        query_tokens = set(self.normalize_token(token) for token in query.lower().split())
 
         # step_prefix = None
         # if step and step.rag_topic:
@@ -82,14 +94,28 @@ class VectorStore:
             type_boost = 1.1 if chunk.get("type") == "explanation" else 1.0
 
             # Tag overlap boost (strong signal)
-            chunk_tags = set(chunk.get("tags", []))
-            tag_overlap = len(query_tokens & chunk_tags)
-            tag_boost = 1 + (0.15 * tag_overlap)
+            chunk_tags = set(self.normalize_token(tag) for tag in chunk.get("tags", []))
+            
+            tag_score = 0.0
+            for tag in chunk_tags:
+                if tag in query_tokens:
+                    if tag in CRITICAL_TAGS:
+                        tag_score += CRITICAL_TAGS[tag]
+                    else:
+                        tag_score += CONTEXT_TAGS.get(tag, 1.0)
+            
+            # normalize tag_score (prevent explosion)
+            tag_boost = 1 + (tag_score / 4)
 
             # Keyword boost (secondary, minor signal)
             content_tokens = set(chunk.get("content", "").lower().split())
             keyword_overlap = len(query_tokens & content_tokens)
-            keyword_boost = 1 + (0.05 * keyword_overlap)
+            # caps effect → prevents long content bias
+            keyword_boost = 1 + min(0.2, 0.05 * keyword_overlap)
+
+            critical_match = any(tag in CRITICAL_TAGS for tag in chunk_tags if tag in query_tokens)
+            if critical_match:
+                similarity_score *= 1.2
 
             # Topic boost (contextual relevance) (secondary, minor signal)
             # if step_prefix:
@@ -106,8 +132,7 @@ class VectorStore:
             # adjusted_similarity = similarity_score * topic_boost
             
             base_score = similarity_score * importance_boost * type_boost
-            signal_boost = (tag_boost + keyword_boost) / 2
-            final_score = base_score * signal_boost
+            final_score = base_score * tag_boost * keyword_boost
 
             # Update scoring
             scored.append((final_score, chunk))
