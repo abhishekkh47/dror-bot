@@ -4,7 +4,42 @@ Tracks how the RAG pipeline evolved — what each approach did, what broke, and 
 
 ---
 
-## Approach 6: Controlled retrieval architecture (current, uncommitted)
+## Approach 7: Semantic intent detection
+
+**What:** Replaced keyword-based `detect_intent(query_tokens)` with embedding-based `detect_intent_semantic(query)`. Instead of matching against a hardcoded word list, the query is embedded and compared via cosine similarity against example phrases for each intent. This means "cancelled", "didn't complete", and "timed out" can all resolve to the `failure` intent without being in a keyword map.
+
+**Key shift:** keyword-driven RAG → intent-aware semantic retrieval.
+
+**Key changes:**
+- `detect_intent(query_tokens)` removed — no more keyword matching
+- `detect_intent_semantic(query: str)` added — embeds the query, compares against `INTENT_DEFINITIONS` examples, returns the best-matching intent if score > 0.75 threshold
+- `INTENT_DEFINITIONS` added to `constants.py` — maps intents to example phrases:
+  - `failure`: "payment failed", "transaction failed", "payment cancelled", "payment did not complete", "payment error", "payment unsuccessful"
+  - `success`: "payment successful", "transaction completed", "payment done"
+- `search()` updated: `detect_intent_semantic(query)` replaces `detect_intent(query_tokens)` — takes the raw query string instead of tokenized set
+- Intent filtering unchanged: `if intent and intent not in chunk_tags: continue`
+
+**Why this over Approach 6:** Approach 6 used keyword matching (`if t in ["fail", "fails", "failed", "failure", "error"]`). This broke on any rephrasing that didn't use those exact words — "cancelled", "didn't complete", "timed out" all missed the intent entirely. The system was overfitted to specific keywords.
+
+**What this fixes:**
+
+| Query | Old (keyword) | New (semantic) |
+|-------|--------------|----------------|
+| "why was payment cancelled?" | No intent detected | → matches "payment cancelled" → `failure` |
+| "payment didn't complete" | No intent detected | → matches "payment did not complete" → `failure` |
+| "transaction failed after processing" | `failure` (keyword match) | `failure` (semantic match, same result) |
+
+**Result:** TBD — pending test execution with the 3 generalization queries.
+
+**Limitations:**
+- Example phrases in `INTENT_DEFINITIONS` are still manually curated — coverage depends on anticipating user phrasings
+- Every call to `detect_intent_semantic` embeds the query + all example phrases at runtime — N embedding calls per intent detection (currently 9 examples = 10 calls including query). No caching of example embeddings
+- Threshold (0.75) is static — may need tuning per intent
+- Only 2 intents defined (failure, success) — queries about webhooks, authentication, fees etc. have no intent and fall through to unfiltered retrieval
+
+---
+
+## Approach 6: Controlled retrieval architecture
 
 **What:** Added token normalization, keyword-based intent detection, and domain filtering as pre-scoring stages inside `VectorStore.search()`. Retrieval now constrains candidates *before* scoring, instead of filtering *after*. The pipeline is now: token normalization → intent detection → domain filtering → intent filtering → semantic ranking → LLM generation.
 

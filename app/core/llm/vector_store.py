@@ -1,7 +1,7 @@
 import json
 import numpy as np
 from app.core.llm.embedding import get_embedding
-from app.utils.constants import CONTEXT_TAGS, CRITICAL_TAGS, TAG_PRIORITY
+from app.utils.constants import CONTEXT_TAGS, CRITICAL_TAGS, INTENT_DEFINITIONS, TAG_PRIORITY
 import re
 
 class VectorStore:
@@ -49,6 +49,7 @@ class VectorStore:
         }
         return mapping.get(token, token)
 
+    # Deprecated
     def detect_intent(self, query_tokens):
         normalized = set()
 
@@ -64,6 +65,30 @@ class VectorStore:
             return "success"
 
         return None
+
+    def detect_intent_semantic(self, query: str):
+        try:
+            query_vec = np.array(get_embedding(query))
+
+            best_intent = None
+            best_score = -1
+            
+            for intent, examples in INTENT_DEFINITIONS.items():
+                for example in examples:
+                    example_vec = np.array(get_embedding(example))
+                    score = self.cosine_similarity(query_vec, example_vec)
+                    
+                    if score > best_score:
+                        best_score = score
+                        best_intent = intent
+                    
+            # threshold prevents noise
+            if best_score > 0.75:
+                return best_intent
+            return None
+        except Exception as e:
+            print(f"Error detecting intent: {e}")
+            return None
     
     # More candidates (top_k) → better chance correct chunk appears
     def search(self, query: str, step=None, top_k=8):
@@ -78,7 +103,7 @@ class VectorStore:
         
         step_domain = None
         step_domain = getattr(step, "domain", None) if step else None
-        intent = self.detect_intent(query_tokens)
+        intent = self.detect_intent_semantic(query)
 
         if step and not step_domain:
             raise ValueError(f"Step '{step.id}' missing domain")

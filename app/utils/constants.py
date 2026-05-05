@@ -21,3 +21,19 @@ CONTEXT_TAGS = {
     "api": 1.2,
     "flow": 1.1
 }
+
+INTENT_DEFINITIONS = {
+    "failure": [
+        "payment failed",
+        "transaction failed",
+        "payment cancelled",
+        "payment did not complete",
+        "payment error",
+        "payment unsuccessful"
+    ],
+    "success": [
+        "payment successful",
+        "transaction completed",
+        "payment done"
+    ]
+}
