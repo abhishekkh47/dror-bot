@@ -2,6 +2,7 @@ import json
 import numpy as np
 from app.core.llm.embedding import get_embedding
 from app.utils.constants import CONTEXT_TAGS, CRITICAL_TAGS, TAG_PRIORITY
+import re
 
 class VectorStore:
     def __init__(self, path: str):
@@ -22,7 +23,7 @@ class VectorStore:
             text_to_embed = f"""
             Topic: {chunk.get('topic', '')}
             Type: {chunk.get('type', '')}
-            Tage: {', '.join(chunk.get('tags', []))}
+            Tags: {', '.join(chunk.get('tags', []))}
             Content: {chunk.get('content', '')}
             """
             # embedding = get_embedding(chunk["content"])
@@ -47,11 +48,29 @@ class VectorStore:
             "succeeded": "success"
         }
         return mapping.get(token, token)
+
+    def detect_intent(self, query_tokens):
+        normalized = set()
+
+        for t in query_tokens:
+            if t in ["fail", "fails", "failed", "failure", "error", "errors"]:
+                normalized.add("failure")
+            elif t in ["success", "succeeded", "completed"]:
+                normalized.add("success")
+
+        if "failure" in normalized:
+            return "failure"
+        if "success" in normalized:
+            return "success"
+
+        return None
     
     # More candidates (top_k) → better chance correct chunk appears
     def search(self, query: str, step=None, top_k=8):
         query_vec = np.array(get_embedding(query))
-        query_tokens = set(self.normalize_token(token) for token in query.lower().split())
+        # query_tokens = set(self.normalize_token(token) for token in query.lower().split())
+        tokens = re.findall(r'\b\w+\b', query.lower())
+        query_tokens = set(self.normalize_token(token) for token in tokens)
 
         # step_prefix = None
         # if step and step.rag_topic:
@@ -59,6 +78,7 @@ class VectorStore:
         
         step_domain = None
         step_domain = getattr(step, "domain", None) if step else None
+        intent = self.detect_intent(query_tokens)
 
         if step and not step_domain:
             raise ValueError(f"Step '{step.id}' missing domain")
@@ -83,6 +103,13 @@ class VectorStore:
                 if not any(chunk_topic.startswith(d) for d in allowed):
                     continue
 
+            # Tag overlap boost (strong signal)
+            chunk_tags = set(self.normalize_token(tag) for tag in chunk.get("tags", []))
+
+            # intent = self.detect_intent(query_tokens)
+            if intent and intent not in chunk_tags:
+                continue
+
             # Importance Boost
             importance_boost = {
                 "high": 1.3,
@@ -92,9 +119,6 @@ class VectorStore:
 
             # Type Boost
             type_boost = 1.1 if chunk.get("type") == "explanation" else 1.0
-
-            # Tag overlap boost (strong signal)
-            chunk_tags = set(self.normalize_token(tag) for tag in chunk.get("tags", []))
             
             tag_score = 0.0
             for tag in chunk_tags:

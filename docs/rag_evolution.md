@@ -4,6 +4,61 @@ Tracks how the RAG pipeline evolved — what each approach did, what broke, and 
 
 ---
 
+## Approach 6: Controlled retrieval architecture (current, uncommitted)
+
+**What:** Added token normalization, keyword-based intent detection, and domain filtering as pre-scoring stages inside `VectorStore.search()`. Retrieval now constrains candidates *before* scoring, instead of filtering *after*. The pipeline is now: token normalization → intent detection → domain filtering → intent filtering → semantic ranking → LLM generation.
+
+**Why this is no longer "basic RAG":** Previous approaches scored everything and then tried to filter out bad results. Now the retrieval is constrained upfront — wrong-domain chunks are discarded before they can compete on similarity, and intent mismatches are excluded before they can be boosted by tags/keywords.
+
+**Key changes in `vector_store.py`:**
+- `normalize_token()` — maps variants to canonical forms (fails/failed/error → failure, succeeded → success)
+- `detect_intent(query_tokens)` — extracts query intent from normalized tokens (e.g. "what happens if payment fails?" → intent: `failure`)
+- Domain filtering: `step.domain` field determines which chunk topic prefixes are allowed. Chunks outside the domain are discarded entirely (hard cutoff, not scored)
+- Intent filtering: if an intent is detected, chunks whose tags don't include that intent are skipped
+- Tag scoring reworked: uses `CRITICAL_TAGS` (failure=3.0, success=2.5) and `CONTEXT_TAGS` (error_handling=1.5, webhook=1.5, etc.) from `constants.py` instead of flat weights
+- Critical tag match gives an additional 1.2x similarity boost
+- Keyword boost capped at 0.2 to prevent long-content bias: `1 + min(0.2, 0.05 * overlap)`
+- `search()` now accepts a `step` parameter — domain and intent filtering happen inside the store, not in the pipeline
+
+**Key changes in `rag_pipeline.py`:**
+- `is_chunk_relevant()` and post-search filtering removed — `search()` now returns pre-filtered results
+- `is_query_related_to_step_v2()` added — uses the domain-filtered search results and score threshold to check step relevance (replaces the old topic-prefix heuristic)
+- `ask_with_context()` simplified — receives already-filtered `scored_chunks` from `search()`, no longer needs its own filter pass
+
+**Retrieval debug — before vs after:**
+
+Before (Approach 5.1, "what happens if payment fails?"):
+```
+0.9530 | create_intent_pending_event_without_completion  ← wrong chunk at rank 1
+```
+
+After (Approach 6):
+```
+1.9167 | create_intent_what_happens_on_completion_failure  ← correct
+1.6688 | create_intent_auto_cancel_behavior                ← correct
+```
+
+The wrong chunk is gone because intent filtering (`"failure" not in chunk_tags`) excluded it before scoring. The fix wasn't tag weights or scoring tweaks — it was constraining retrieval before scoring.
+
+**What's still weak (will break in production):**
+
+1. **Keyword-based intent detection is brittle.** `detect_intent` uses a hardcoded word list (`fail/fails/failed/failure/error`). Rephrasings like "why was payment cancelled?", "payment didn't complete", "transaction timed out" will not trigger the `failure` intent. The system is still overfitted to specific keywords.
+
+2. **Hard intent filtering is aggressive.** `if intent and intent not in chunk_tags: continue` — if a chunk is mis-tagged or tags are incomplete, correct answers are silently dropped. Tag quality is now a critical dependency.
+
+3. **Tag correctness is assumed, not verified.** The system's retrieval quality now depends entirely on chunks having correct and complete tags. There's no fallback if tagging is wrong — retrieval silently degrades.
+
+4. **No generalization across phrasings.** Queries that need to be tested:
+   - "why was payment cancelled?"
+   - "payment didn't complete"
+   - "transaction failed after processing"
+
+   These will reveal whether the system generalizes or is overfitted to the "failure" keyword.
+
+**Next step:** Replace `detect_intent(query_tokens)` with embedding-based intent classification — `classify_intent_with_embedding(query)` — so "didn't go through", "cancelled", "timed out" all map to the `failure` intent without keyword dependency.
+
+---
+
 ## Approach 5.1: Test results — first production-like behavior
 
 **Test results:**
@@ -21,20 +76,15 @@ All 3 cases pass. Domain filtering, retrieval quality, semantic matching, and ga
 - Semantic matching maps vague queries to correct chunks (Case 3: "payment fails" → `create_intent_what_happens_on_completion_failure`)
 - Score-gated fallback correctly distinguishes "filter missed" from "out-of-scope"
 
-**What's still weak (will break in production):**
+**What's still weak (identified in 5.1, fixed in Approach 6):**
 
-1. **Overfitting to the dataset.** Case 3 worked because a chunk named `create_intent_what_happens_on_completion_failure` happened to exist. Rephrasings like "why did payment get cancelled?", "what if transaction fails after creation?", or "does payment rollback?" will likely retrieve the wrong chunk, fall below threshold, or hallucinate. The system is fragile to query phrasing.
+1. **Overfitting to the dataset.** Case 3 worked because a chunk named `create_intent_what_happens_on_completion_failure` happened to exist.
 
-2. **No intent abstraction.** The pipeline is `query → embedding → nearest chunk`. Missing layer: `query → intent → retrieval scope`. Without intent detection, the system can't generalize across different phrasings of the same question.
+2. **No intent abstraction.** The pipeline was `query → embedding → nearest chunk`. Missing layer: `query → intent → retrieval scope`.
 
-3. **Static relevance threshold.** `threshold = 0.55` is applied uniformly. Some domains need strict matching (payment status evaluation) while others need flexible matching (create_intent which spans auth, validation, business rules). A single threshold can't serve both.
+3. **Static relevance threshold.** `threshold = 0.55` applied uniformly across domains with different matching needs.
 
-4. **Retrieval ranking has a hidden issue.** Debug output showed `0.9530 | create_intent_pending_event_without_completion` ranking highest for a failure question. That chunk is about orphan pending socket events, not about failure handling. The LLM happened to pick the right info from lower-ranked chunks, but the retriever is surfacing the wrong chunk at rank 1. This is luck, not correctness.
-
-**Next steps needed:**
-- Intent abstraction layer between query and retrieval
-- Per-domain or adaptive thresholds
-- Better chunk discrimination — chunks about related but distinct concepts (failure vs. pending orphan) shouldn't score identically
+4. **Retrieval ranking issue.** `create_intent_pending_event_without_completion` ranked highest (0.9530) for a failure question — wrong chunk at rank 1, correct answer only appeared because the LLM picked from lower-ranked chunks. Luck, not correctness.
 
 ---
 

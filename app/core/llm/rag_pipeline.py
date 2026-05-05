@@ -85,11 +85,14 @@ def ask_with_context(query: str, step):
     # 1. retrieve candidates
     scored_chunks = store.search(query, step, top_k=8)
 
-    filtered = [
-        (score, chunk)
-        for score, chunk in scored_chunks
-        if is_chunk_relevant(chunk, step)
-    ]
+    # This 'filtered' is not required anymore
+    # search() already returns filtered chunks based on doamin and intent
+    # filtered = [
+    #     (score, chunk)
+    #     for score, chunk in scored_chunks
+    #     if is_chunk_relevant(chunk, step)
+    # ]
+    filtered = scored_chunks
 
     # 3. enforce boundary
     if not filtered: 
@@ -106,7 +109,7 @@ def ask_with_context(query: str, step):
     # use score directly 
     top_score = filtered[0][0]
     
-    if top_score < 0.6:
+    if top_score < 0.5:
         return handle_out_of_scope(query, step)
     
     # 4. Build context
