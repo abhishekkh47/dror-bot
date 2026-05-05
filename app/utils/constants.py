@@ -23,17 +23,18 @@ CONTEXT_TAGS = {
 }
 
 INTENT_DEFINITIONS = {
-    "failure": [
-        "payment failed",
-        "transaction failed",
+    "creation_failure": [
+        "intent creation failed",
+        "api failed to create intent"
+    ],
+    "processing_failure": [
+        "payment failed after processing",
+        "auto completion failed",
         "payment cancelled",
-        "payment did not complete",
-        "payment error",
-        "payment unsuccessful"
+        "payment didn't complete"
     ],
     "success": [
         "payment successful",
-        "transaction completed",
-        "payment done"
+        "transaction completed"
     ]
 }

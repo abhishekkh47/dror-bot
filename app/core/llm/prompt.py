@@ -36,6 +36,8 @@ def build_prompt_with_step(query: str, context: str, step) -> str:
     - If missing, say: Not available in public docs
     - Do not mention internal phases, step numbers, or system internals
     - Do not add extra details unless explicitly required
+    - Do NOT generalize beyond the exact stage described in context
+    - If context refers to post-processing failure, do not describe it as creation failure
 
     Context: 
     {context}

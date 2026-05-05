@@ -4,6 +4,47 @@ Tracks how the RAG pipeline evolved — what each approach did, what broke, and 
 
 ---
 
+## Approach 7.1: Analysis — what semantic intent exposed
+
+**What's working (achieved so far):**
+- Domain-aware retrieval
+- Semantic intent detection
+- Meaningful ranking
+
+**Retrieval debug confirms correct ranking:**
+```
+1.9167 | create_intent_what_happens_on_completion_failure  ← correct, rank 1
+1.6688 | create_intent_auto_cancel_behavior                ← correct, rank 2
+```
+The wrong chunk (`pending_event_without_completion`) is gone. Only failure-relevant chunks remain. Ranking is now dominated by intent + domain, not noise.
+
+**What's still broken:**
+
+1. **LLM answer precision — semantic distortion.** The LLM returned "payment intent was not created successfully" for a query about post-processing failure. The retrieved chunks correctly describe auto-completion failure AFTER creation, but the LLM generalized it into "creation failed." Root cause: the prompt allows the LLM to generalize beyond the exact lifecycle stage described in the context. This is a prompt discipline problem, not a retrieval problem.
+
+2. **Coarse intent model — failure types are collapsed.** The single `failure` intent covers creation failure, auto-completion failure, and cancellation. These are different lifecycle stages with different answers. When a user asks "why did intent creation fail?" vs "why did payment fail after processing?", the system returns the same chunks. Sub-intent separation needed:
+   - `creation_failure` — intent creation API errors
+   - `processing_failure` — auto-completion failures, cancellations, incomplete payments
+
+3. **Hard intent filtering is too aggressive.** `if intent and intent not in chunk_tags: continue` eliminates chunks entirely on tag mismatch. If a chunk is mis-tagged or tags are incomplete, correct answers are silently dropped. Should be replaced with soft boost/penalty:
+   - Intent matches tag → boost (1.5x)
+   - Intent doesn't match tag → penalize (0.7x) but keep in scoring
+   - This makes the system robust to imperfect tagging
+
+4. **No stage awareness.** The system knows domain and intent, but not lifecycle stage. Example: user is on `check_intent_response` and asks "why payment failed?" — the failure actually happens during auto-completion, a later stage. The system should either redirect the user to the correct step or answer with an explicit stage clarification.
+
+**Next steps (priority order):**
+
+1. **Fix prompt discipline** — add constraint: "Do NOT generalize beyond the exact stage described in context. If context refers to post-processing failure, do not describe it as creation failure."
+
+2. **Split intent into sub-types** — replace flat `failure`/`success` with `creation_failure`, `processing_failure`, `success` in `INTENT_DEFINITIONS`
+
+3. **Replace hard filter with soft boost** — intent match → 1.5x boost, intent mismatch → 0.7x penalty (not elimination)
+
+4. **Add stage awareness** — map flow steps to lifecycle stages so the system can detect cross-stage queries and either redirect or clarify
+
+---
+
 ## Approach 7: Semantic intent detection
 
 **What:** Replaced keyword-based `detect_intent(query_tokens)` with embedding-based `detect_intent_semantic(query)`. Instead of matching against a hardcoded word list, the query is embedded and compared via cosine similarity against example phrases for each intent. This means "cancelled", "didn't complete", and "timed out" can all resolve to the `failure` intent without being in a keyword map.
@@ -29,7 +70,7 @@ Tracks how the RAG pipeline evolved — what each approach did, what broke, and 
 | "payment didn't complete" | No intent detected | → matches "payment did not complete" → `failure` |
 | "transaction failed after processing" | `failure` (keyword match) | `failure` (semantic match, same result) |
 
-**Result:** TBD — pending test execution with the 3 generalization queries.
+**Result:** Retrieval now correctly identifies failure intent across phrasings. But exposed three deeper problems: LLM answer precision, coarse intent model, and aggressive hard filtering. See Approach 7.1 for details.
 
 **Limitations:**
 - Example phrases in `INTENT_DEFINITIONS` are still manually curated — coverage depends on anticipating user phrasings

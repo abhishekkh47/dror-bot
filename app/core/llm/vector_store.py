@@ -132,8 +132,15 @@ class VectorStore:
             chunk_tags = set(self.normalize_token(tag) for tag in chunk.get("tags", []))
 
             # intent = self.detect_intent(query_tokens)
-            if intent and intent not in chunk_tags:
-                continue
+            # if intent and intent not in chunk_tags:
+            #     continue
+
+            # replace hard filter with soft boost
+            intent_boost = 1.0
+            if intent:
+                intent_boost = 1.5 if intent in chunk_tags else 0.7
+            else:
+                intent_boost = 1.0
 
             # Importance Boost
             importance_boost = {
@@ -163,8 +170,7 @@ class VectorStore:
             keyword_boost = 1 + min(0.2, 0.05 * keyword_overlap)
 
             critical_match = any(tag in CRITICAL_TAGS for tag in chunk_tags if tag in query_tokens)
-            if critical_match:
-                similarity_score *= 1.2
+            critical_boost = 1.2 if critical_match else 1.0
 
             # Topic boost (contextual relevance) (secondary, minor signal)
             # if step_prefix:
@@ -180,8 +186,9 @@ class VectorStore:
             """
             # adjusted_similarity = similarity_score * topic_boost
             
-            base_score = similarity_score * importance_boost * type_boost
-            final_score = base_score * tag_boost * keyword_boost
+            base_score = similarity_score * importance_boost * type_boost * critical_boost
+            signal_boost = tag_boost * keyword_boost
+            final_score = base_score * signal_boost * intent_boost
 
             # Update scoring
             scored.append((final_score, chunk))
