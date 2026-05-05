@@ -11,14 +11,18 @@ def ask(query: str):
 
 def handle_out_of_scope(query: str, step):
     return f"""
-    This question is not relevant to the current step: "{step.title}".
+    This question is outside the current step: "{step.title}".
 
-    You are currently in a different part of the integration flow.
+    You're currently working on: {step.title}
 
-    Ask a question related to this step or move to the appropriate step.
+    If you're trying to understand payment headers, go back to the "Create Intent" step.
+
+    Otherwise, ask something related to:
+    - payment status
+    - success/failure handling
     """.strip()
 
-# Detect intent mismatch
+# Detect intent mismatch (deprecated)
 def is_query_related_to_step(scored_chunks, step, threshold=0.55):
     """
     Check if any of the top chunks relevant to this step
@@ -32,6 +36,22 @@ def is_query_related_to_step(scored_chunks, step, threshold=0.55):
                 return True
 
     return False
+
+def is_query_related_to_step_v2(query: str, step, store, threshold=0.55):
+    """
+    Determine if query is relevant to current step
+    using embedding similarity against step-specific chunks
+    """
+
+    # get top candidates (already domain filtered)
+    scored_chunks = store.search(query, step=step, top_k=8)
+
+    if not scored_chunks:
+        return False
+    
+    top_score = scored_chunks[0][0]
+
+    return top_score >= threshold
 
 def is_chunk_relevant(chunk, step):
     step_tokens = step.rag_topic.split("_")
@@ -63,7 +83,7 @@ def ask_with_context(query: str, step):
     7. Generate response
     """
     # 1. retrieve candidates
-    scored_chunks = store.search(query, top_k=8)
+    scored_chunks = store.search(query, step, top_k=8)
 
     filtered = [
         (score, chunk)
@@ -75,7 +95,9 @@ def ask_with_context(query: str, step):
     if not filtered: 
         # return handle_out_of_scope(query, step)
         # Add soft fallback instead -> this prevents total failure
-        if not is_query_related_to_step(scored_chunks, step):
+
+        # if not is_query_related_to_step(scored_chunks, step):
+        if not is_query_related_to_step_v2(query, step, store):
             return handle_out_of_scope(query, step)
         
         # allow soft fallback only if query is related to step

@@ -4,6 +4,40 @@ Tracks how the RAG pipeline evolved — what each approach did, what broke, and 
 
 ---
 
+## Approach 5.1: Test results — first production-like behavior
+
+**Test results:**
+
+| Case | Step | Query | Expected | Actual | Pass? |
+|------|------|-------|----------|--------|-------|
+| 1 | `check_intent_response` | "what headers are required?" | API-level answer | Returned correct headers | Yes |
+| 2 | `evaluate_status` | "what headers are required?" | Should NOT give API details | Blocked — no leakage | Yes |
+| 3 | `check_intent_response` | "what happens if payment fails?" | Failure at creation | Mapped to auto-cancel/failure info | Yes |
+
+All 3 cases pass. Domain filtering, retrieval quality, semantic matching, and gating logic are all working. This is the first time the system behaves like a real product rather than a fragile demo.
+
+**What's working:**
+- Domain filtering blocks cross-step queries (Case 2 no longer leaks)
+- Semantic matching maps vague queries to correct chunks (Case 3: "payment fails" → `create_intent_what_happens_on_completion_failure`)
+- Score-gated fallback correctly distinguishes "filter missed" from "out-of-scope"
+
+**What's still weak (will break in production):**
+
+1. **Overfitting to the dataset.** Case 3 worked because a chunk named `create_intent_what_happens_on_completion_failure` happened to exist. Rephrasings like "why did payment get cancelled?", "what if transaction fails after creation?", or "does payment rollback?" will likely retrieve the wrong chunk, fall below threshold, or hallucinate. The system is fragile to query phrasing.
+
+2. **No intent abstraction.** The pipeline is `query → embedding → nearest chunk`. Missing layer: `query → intent → retrieval scope`. Without intent detection, the system can't generalize across different phrasings of the same question.
+
+3. **Static relevance threshold.** `threshold = 0.55` is applied uniformly. Some domains need strict matching (payment status evaluation) while others need flexible matching (create_intent which spans auth, validation, business rules). A single threshold can't serve both.
+
+4. **Retrieval ranking has a hidden issue.** Debug output showed `0.9530 | create_intent_pending_event_without_completion` ranking highest for a failure question. That chunk is about orphan pending socket events, not about failure handling. The LLM happened to pick the right info from lower-ranked chunks, but the retriever is surfacing the wrong chunk at rank 1. This is luck, not correctness.
+
+**Next steps needed:**
+- Intent abstraction layer between query and retrieval
+- Per-domain or adaptive thresholds
+- Better chunk discrimination — chunks about related but distinct concepts (failure vs. pending orphan) shouldn't score identically
+
+---
+
 ## Approach 5: Signal-based retrieval
 
 **What:** Moved from rule-based retrieval (binary include/exclude filters) to signal-based retrieval where multiple weak signals are combined into a composite score, and scores drive all decisions — ranking, filtering, and fallback.
@@ -26,7 +60,7 @@ Tracks how the RAG pipeline evolved — what each approach did, what broke, and 
 
 **Why this over Approach 4:** Approach 4 had two fatal flaws: (1) binary `is_relevant` filter discarded score information — a chunk was either in or out, (2) blind fallback (`context_chunks[:2]`) let any query get answered regardless of step. The system couldn't distinguish "filter missed something" from "query doesn't belong here." Moving to signal-based means scores carry through, and the fallback decision itself is score-gated.
 
-**Result:** TBD — pending test execution.
+**Result:** All 3 test cases pass — see Approach 5.1 for detailed results.
 
 **Limitations:**
 - Tag overlap still depends on naming conventions between `rag_topic` tokens and chunk tags

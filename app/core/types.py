@@ -9,6 +9,7 @@ class Step(BaseModel):
     options: Optional[List[str]] = None
     rag_topic: Optional[str] = None
     next: Optional[Union[str, Dict[str, str]]] = None
+    domain: Optional[List[str]] = None
 
 class Flow(BaseModel):
     flow_id: str
