@@ -39,38 +39,47 @@ class VectorStore:
     # More candidates (top_k) → better chance correct chunk appears
     def search(self, query: str, top_k=8):
         query_vec = np.array(get_embedding(query))
+        query_tokens = set(query.lower().split())
 
         scored = []
         for item in self.vectors:
-            score = self.cosine_similarity(query_vec, item["embedding"])
+            chunk = item["chunk"]
+            similarity_score = self.cosine_similarity(query_vec, item["embedding"])
 
+            # Importance Boost
             importance_boost = {
-                "high": 1.2,
+                "high": 1.3,
                 "medium": 1.0,
-                "low": 0.8
-            }.get(item["chunk"].get("importance", "medium"), 1.0)
+                "low": 0.7
+            }.get(chunk.get("importance", "medium"), 1.0)
 
-            type_boost = 1.1 if item["chunk"]["type"] == "explanation" else 1.0
+            # Type Boost
+            type_boost = 1.1 if chunk.get("type") == "explanation" else 1.0
 
-            # final_score = score * importance_boost * type_boost
+            # Tag overlap boost (strong signal)
+            chunk_tags = set(chunk.get("tags", []))
+            tag_overlap = len(query_tokens & chunk_tags)
+            tag_boost = 1 + (0.15 * tag_overlap)
+
+            # Keyword bonus (secondary, minor signal)
+            content_tokens = set(chunk.get("content", "").lower().split())
+            keyword_overlap = len(query_tokens & content_tokens)
+            keyword_boost = 1 + (0.05 * keyword_overlap)
+            
+            final_score = similarity_score * importance_boost * type_boost * tag_boost * keyword_boost
+
             # Update scoring
-            query_lower = query.lower()
-            content_lower = item["chunk"]["content"].lower()
-            keyword_bonus = 0.0
-            if any(word in content_lower for word in query_lower.split()):
-                keyword_bonus = 0.1
-            final_score = (score + keyword_bonus) * importance_boost * type_boost
+            scored.append((final_score, chunk))
 
-            scored.append((final_score, item["chunk"]))
 
-            for s, c in scored[:5]:
-                print(f"SCORE: {s:.4f} | {c['id']}")
-
+        # After scoring everything, sort by score descending and return top_k
         scored.sort(key=lambda x: x[0], reverse=True)
 
-        # return [chunk for _, chunk in scored[:top_k]]
+        print("\n--- RETRIEVAL DEBUG ---")
+        for s, c in scored[:5]:
+            # print(f"SCORE: {s:.4f} | {c['id']}")
+            print(f"{s:.4f} | {c['topic']} | {c.get('tags', [])}")
 
-        # return score + chunk:
         return scored[:top_k]
     
     # Pre-compute topic embeddings

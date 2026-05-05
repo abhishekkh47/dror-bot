@@ -4,7 +4,39 @@ Tracks how the RAG pipeline evolved — what each approach did, what broke, and 
 
 ---
 
-## Approach 4.1: Test results — blind fallback defeats flow control (current, uncommitted)
+## Approach 5: Signal-based retrieval
+
+**What:** Moved from rule-based retrieval (binary include/exclude filters) to signal-based retrieval where multiple weak signals are combined into a composite score, and scores drive all decisions — ranking, filtering, and fallback.
+
+**Key shift:** Previously, scoring happened in `VectorStore` (cosine similarity + boosts), but then `rag_pipeline.py` threw away the scores and applied binary rule filters (`is_relevant` → true/false). Now scores flow through the entire pipeline: `VectorStore.search()` returns `(score, chunk)` tuples, and the pipeline uses those scores for both relevance filtering and threshold guards.
+
+**Changes in `vector_store.py` — multi-signal scoring:**
+- Scoring formula: `cosine_similarity * importance_boost * type_boost * tag_boost * keyword_boost`
+- importance_boost: high=1.3, medium=1.0, low=0.7 (widened from 1.2/1.0/0.8)
+- tag_boost: `1 + (0.15 * tag_overlap)` — counts query-token/tag intersections, scales proportionally
+- keyword_boost: `1 + (0.05 * keyword_overlap)` — minor signal from content word matches
+- `search()` now returns `(score, chunk)` tuples instead of just chunks
+- Pre-computed topic embeddings via `build_topic_index()` for future semantic topic matching
+
+**Changes in `rag_pipeline.py` — conditional fallback:**
+- `is_chunk_relevant(chunk, step)` — tag overlap (primary) + topic prefix match (secondary), replaces the old substring check
+- `is_query_related_to_step(scored_chunks, step)` — checks if any top chunk shares a topic domain prefix with the step AND has a score above threshold (0.55). This distinguishes "filter missed a relevant chunk" from "query is truly out-of-scope"
+- Conditional fallback: only falls back to `scored_chunks[:2]` if `is_query_related_to_step` returns True — otherwise blocks with out-of-scope
+- Score threshold (0.6): reuses the score already computed during search instead of re-embedding (eliminates the extra embedding calls from Approach 4)
+
+**Why this over Approach 4:** Approach 4 had two fatal flaws: (1) binary `is_relevant` filter discarded score information — a chunk was either in or out, (2) blind fallback (`context_chunks[:2]`) let any query get answered regardless of step. The system couldn't distinguish "filter missed something" from "query doesn't belong here." Moving to signal-based means scores carry through, and the fallback decision itself is score-gated.
+
+**Result:** TBD — pending test execution.
+
+**Limitations:**
+- Tag overlap still depends on naming conventions between `rag_topic` tokens and chunk tags
+- Topic prefix match (`step_tokens[0]`) is coarse — "create" would match "create_intent_api" and "create_something_unrelated"
+- Pre-computed topic embeddings (`build_topic_index`) exist but aren't used yet in the scoring pipeline
+- Threshold values (0.55 for relatedness, 0.6 for final guard) are not tuned
+
+---
+
+## Approach 4.1: Test results — blind fallback defeats flow control
 
 **Test results:**
 
