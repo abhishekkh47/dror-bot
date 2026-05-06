@@ -4,6 +4,67 @@ Tracks how the RAG pipeline evolved — what each approach did, what broke, and 
 
 ---
 
+## Approach 9.1: From semantic collapse to query-aware answering
+
+**What:** After fixing hallucination and timeline corruption (Approach 9), the system overcorrected into semantic collapse — all 3 test queries produced the identical safe response: "payment failed during processing after intent creation." The model learned to repeat the one canonical sentence that satisfied all prompt constraints, losing query specificity, answer richness, and causal differentiation.
+
+**Root cause:** The prompt overweighted rigid constraints ("NEVER say X", "ALWAYS say Y"), so the LLM defaulted to its safest escape hatch. The sanitizer was also too aggressive — it had become an answer rewrite engine that normalized all responses into the same sentence.
+
+**Fixes applied:**
+
+1. **Prompt rewrite — query-aware answering (`prompt.py`):**
+   - Removed rigid "ALWAYS say" / "NEVER say" constraints, replaced with softer guidance: "If failure occurs after intent creation, describe it as occurring during processing / auto-completion / after intent creation"
+   - Added QUERY INTERPRETATION section — instructs the LLM to tailor answers to the user's specific wording: "why cancelled" → explain cancellation cause, "didn't complete" → explain incomplete outcome, "failed after processing" → emphasize late-stage failure
+   - Added CONTEXT INTERPRETATION section — teaches the LLM that retrieved context about failure/rollback/cancellation does NOT necessarily mean intent creation failed
+   - Added cause → outcome ordering: "First explain WHAT caused the failure, then explain the RESULTING state change"
+   - Added contradiction guard: "If context says intent creation succeeded, you must never describe it as failed later in the answer"
+
+2. **Sanitizer reduced to surgical corrections (`rag_pipeline.py`):**
+   - Removed broad normalization that collapsed all answers into one sentence
+   - Now only: removes sentences containing webhook/socket/polling/internal-signal, and regex-replaces "intent creation failed" → "processing failed after intent creation"
+   - Sanitizer is a safety net, not an answer rewrite engine
+
+3. **Chunk selector improved (`chunk_selector.py`):**
+   - Noise topics (pending_event, socket, polling, webhook, notification) are now soft-penalized (0.35x score) instead of hard-removed, so they can still surface if explicitly asked about
+   - JSON parsing uses regex extraction (`re.search`) to handle markdown-wrapped responses from the LLM
+   - Fallback improved: if selector returns no valid IDs, falls back to top chunks within 75% of the top score (minimum 0.9), not blind top-2
+   - Case-insensitive matching for selected IDs
+
+**Test results:**
+
+| Case | Query | Response | Pass? |
+|------|-------|----------|-------|
+| 1 | "why was payment cancelled?" | Explains cancellation cause — auto-completion failed, transaction rolled back and cancelled | Yes |
+| 2 | "payment didn't complete" | Explains incomplete processing — failure during auto-completion, API returned error | Yes |
+| 3 | "transaction failed after processing" | Explains late-stage failure — processing had started, system rolled back and cancelled | Yes |
+
+All 3 queries now produce **different, query-specific answers** while maintaining phase correctness and no leakage.
+
+**System maturity at this point:**
+
+| Layer | Status |
+|-------|--------|
+| Retrieval | Done |
+| Intent scoring | Done |
+| Chunk selection | Done |
+| Context shaping | Done |
+| Hallucination suppression | Done |
+| Timeline correctness | Done |
+| Query-specific answering | Done |
+
+**Limitations:**
+- Prompt is now very long (~240 lines across v1 and v2) — increases token cost per request
+- Still relies on `sanitize_response()` as a post-hoc safety net — if the prompt and chunk selector work correctly, this should never trigger
+- Chunk selector adds latency (extra LLM call) — not yet profiled for production
+- No answer verification — system can't detect if the final answer contradicts the context
+
+**Roadmap (unchanged):**
+1. Done: LLM chunk selector
+2. **NEXT:** Cross-encoder reranker
+3. **LATER:** Hybrid retrieval (BM25 + dense retrieval + reranker + selector + answer generator)
+
+---
+
 ## Approach 9: LLM-based chunk selector — two-stage generation
 
 **What:** Inserted a lightweight LLM call between retrieval and final answer generation. Instead of sending all retrieved chunks directly to the answer LLM, a selector LLM first picks the most relevant chunk IDs, then only those chunks form the final context. The pipeline is now two-stage generation:

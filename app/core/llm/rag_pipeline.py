@@ -4,6 +4,7 @@ from app.core.llm.prompt import build_prompt, build_prompt_with_step
 from app.core.llm.llm import generate_response
 from app.utils.logger import logger
 import numpy as np
+import re
 
 def ask(query: str):
     context = retrieve_context(query)
@@ -75,14 +76,32 @@ def is_noise_chunk(chunk):
     ]
 
 def sanitize_response(resp: str):
-    forbidden = ["webhook", "socket", "event"]
-    for word in forbidden:
-        if word in resp.lower():
-            return "Answer: Payment failed during processing after intent creation."
-    
-    if "intent creation failed" in resp.lower():
-        return resp.replace("intent creation failed", "payment failed after intent creation")
 
+    forbidden_patterns = [
+        r"webhook",
+        r"socket",
+        r"polling",
+        r"internal signal",
+    ]
+
+    # Remove forbidden sentences
+    sentences = re.split(r'(?<=[.!?])\s+', resp)
+    cleaned = []
+
+    for sentence in sentences:
+        lower = sentence.lower()
+        if any(p in lower for p in forbidden_patterns):
+            continue
+        cleaned.append(sentence)
+
+    resp = " ".join(cleaned).strip()
+    # factual correction only
+    resp = re.sub(
+        r"intent creation failed",
+        "processing failed after intent creation",
+        resp,
+        flags=re.IGNORECASE
+    )
     return resp
 
 def ask_with_context(query: str, step):
