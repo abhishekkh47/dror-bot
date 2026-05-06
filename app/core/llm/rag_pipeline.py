@@ -1,6 +1,8 @@
+from app.core.llm.chunk_selector import select_relevant_chunks
 from app.core.llm.retriever import retrieve_context, store
 from app.core.llm.prompt import build_prompt, build_prompt_with_step
 from app.core.llm.llm import generate_response
+from app.utils.logger import logger
 import numpy as np
 
 def ask(query: str):
@@ -98,51 +100,44 @@ def ask_with_context(query: str, step):
     6. Build prompt
     7. Generate response
     """
-    # 1. retrieve candidates
-    scored_chunks = store.search(query, step, top_k=8)
 
-    if not scored_chunks:
-        return "No relevant context found for this query."
+    try:
+        # 1. retrieve candidates
+        scored_chunks = store.search(query, step, top_k=8)
 
-    # Step 1 — remove noise FIRST
-    filtered = [
-        (score, chunk)
-        for score, chunk in scored_chunks
-        if not is_noise_chunk(chunk)
-    ]
+        if not scored_chunks:
+            return "No relevant context found for this query."
 
-    # Step 2 — fallback AFTER noise filtering
-    if not filtered:
-        filtered = scored_chunks[:2]
+        # Step 1 — remove noise FIRST
+        filtered = [
+            (score, chunk)
+            for score, chunk in scored_chunks
+            if not is_noise_chunk(chunk)
+        ]
 
-    if not filtered:
-        return "No relevant context found."
+        # Step 2 — fallback AFTER noise filtering
+        if not filtered:
+            filtered = scored_chunks[:2]
 
-    # Step 3 — trim aggressively (this is key)
-    TOP_N = 2
+        filtered = select_relevant_chunks(query, filtered)
+        
+        if not filtered:
+            filtered = scored_chunks[:2]
 
-    # ensure same semantic group
-    primary_topic = filtered[0][1]["topic"].split("_")[0]
+        # Step 4 — build context
+        context = "\n\n".join([
+            chunk['content']
+            for _, chunk in filtered
+        ])
 
-    filtered = [
-        (score, chunk)
-        for score, chunk in filtered
-        if chunk["topic"].startswith(primary_topic)
-    ][:TOP_N]
+        prompt = build_prompt_with_step(
+            query=query,
+            context=context,
+            step=step
+        )
 
-    # Step 4 — build context
-    context = "\n\n".join([
-        f"""
-        {chunk['content']}
-        """.strip()
-        for score, chunk in filtered
-    ])
-
-    prompt = build_prompt_with_step(
-        query=query,
-        context=context,
-        step=step
-    )
-
-    response = generate_response(prompt)
-    return sanitize_response(response)
+        response = generate_response(prompt)
+        return sanitize_response(response)
+    except Exception as e:
+        logger.error(f"Error asking with context: {e}")
+        return f"An error occurred while processing your request: {e}. Please try again later."

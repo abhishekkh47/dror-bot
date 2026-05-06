@@ -4,6 +4,56 @@ Tracks how the RAG pipeline evolved — what each approach did, what broke, and 
 
 ---
 
+## Approach 9: LLM-based chunk selector — two-stage generation
+
+**What:** Inserted a lightweight LLM call between retrieval and final answer generation. Instead of sending all retrieved chunks directly to the answer LLM, a selector LLM first picks the most relevant chunk IDs, then only those chunks form the final context. The pipeline is now two-stage generation:
+
+```
+query → vector retrieval → LLM chunk selector → compressed context → final answer LLM
+```
+
+**Why this before a reranker:** The actual bottleneck was chunk utilization, not ordering. A reranker improves ranking precision, but the system was already retrieving the right chunks — the problem was that the answer LLM blended them, mixed lifecycle stages, and leaked implementation details. The chunk selector attacks this directly by reducing context to only the 1-2 chunks that directly answer the question. Bonus: smaller final context means cheaper and faster answer generation.
+
+**Key changes:**
+- New file `chunk_selector.py`:
+  - `build_chunk_selection_prompt(query, chunks)` — presents each chunk's topic, tags, and content (truncated to 700 chars) to the LLM with strict rules: return only relevant chunk IDs, max 2, ignore socket/webhook/polling/notification chunks unless explicitly asked, prefer root cause / failure reason / outcome chunks
+  - `select_relevant_chunks(query, scored_chunks)` — calls the selector LLM, parses JSON response to get `selected_ids`, filters scored chunks to only those IDs, falls back to top 2 if selector fails or returns empty
+- `rag_pipeline.py` updated:
+  - Replaced `TOP_N = 2; filtered = filtered[:TOP_N]` with `filtered = select_relevant_chunks(query, filtered)`
+  - Context builder now uses only `chunk['content']` — no tags, topic names, or metadata (those bias generation)
+
+**Selector constraints (important for correctness):**
+- Returns only IDs, never explanations — prevents selector from injecting its own reasoning
+- Max 2 chunks — constrains context size, prevents blending
+- Fallback always exists — if JSON parsing fails or selector hallucinates, falls back to top 2 scored chunks
+- Selector itself can hallucinate, which is why output is IDs-only and validated against actual chunk topics
+
+**Expected behavior:**
+
+Query: "why was payment cancelled?"
+```
+Retrieval:  failure chunk, rollback chunk, socket chunk, polling chunk
+Selector:   { "selected_ids": ["create_intent_what_happens_on_completion_failure", "create_intent_auto_cancel_behavior"] }
+Final:      "The payment was cancelled due to a failure during auto-completion after intent creation."
+```
+
+No webhook/socket garbage. No phase confusion.
+
+**Result:** TBD — pending test execution.
+
+**Limitations:**
+- Extra LLM call adds latency (but selector prompt is small, and final generation is cheaper due to smaller context)
+- Selector can hallucinate IDs that don't exist — fallback catches this but silently degrades to unselected top-2
+- JSON parsing is fragile — LLM may return markdown-wrapped JSON (`\`\`\`json ... \`\`\``) which needs cleaning before `json.loads()`
+- Selector prompt suppresses webhook/socket/notification chunks universally — if the user actually asks about those, the selector will incorrectly filter them out
+
+**Roadmap (correct sequencing):**
+1. **NOW:** LLM chunk selector (highest quality improvement per complexity added)
+2. **LATER:** Cross-encoder reranker
+3. **MUCH LATER:** Hybrid retrieval (BM25 + dense retrieval + reranker + selector + answer generator) — enterprise-grade RAG
+
+---
+
 ## Approach 8: From retrieval quality to answer quality
 
 *Prompt discipline + soft intent boost + chunk selection pipeline*
