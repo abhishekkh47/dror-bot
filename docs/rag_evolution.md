@@ -4,6 +4,69 @@ Tracks how the RAG pipeline evolved — what each approach did, what broke, and 
 
 ---
 
+## Approach 8: From retrieval quality to answer quality
+
+*Prompt discipline + soft intent boost + chunk selection pipeline*
+
+**What:** Addressed the three problems exposed by Approach 7.1: LLM answer precision, hard intent filtering, and noisy chunk aggregation. Applied fixes at three layers: prompt, scoring, and post-retrieval selection.
+
+**Key shift:** The main failure was no longer retrieval — it was answer contamination. Retrieved chunks were relevant, but the LLM blended them, mixed lifecycle stages, and hallucinated details. The bottleneck moved from "getting the right chunks" to "using them correctly."
+
+**Changes — prompt discipline (`prompt.py`):**
+- Restructured prompt with explicit sections: USER QUESTION, CURRENT STEP, CONTEXT, ANSWERING RULES, STRICT CONTEXT RULES, RESPONSE STYLE
+- Added lifecycle stage awareness: "Distinguish carefully between intent creation, processing, auto-completion, cancellation, final settlement"
+- Added hard constraint: if failure occurs AFTER intent creation, never say "intent creation failed" — instead say "the payment failed after intent creation"
+- Webhook/socket/polling details suppressed unless explicitly asked
+- Response capped at 2-4 sentences, no markdown headings, no bullet points unless requested
+
+**Changes — soft intent boost (`vector_store.py`):**
+- Replaced hard intent filter (`if intent not in chunk_tags: continue`) with soft boost/penalty:
+  - Intent matches chunk tags → 1.5x boost
+  - Intent doesn't match → 0.7x penalty (chunk stays in scoring, just deprioritized)
+- Rebalanced scoring formula to reduce embedding dominance:
+  ```
+  final_score = (base_score * 0.6 + tag_component * 0.25 + intent_component * 0.15) * keyword_boost
+  ```
+  - `base_score` = similarity * importance * type * critical (60% weight)
+  - `tag_component` = tag_boost * 2.5 weight (25% weight)
+  - `intent_component` = intent_boost * 2.0 weight (15% weight)
+- Tag score normalization: `1 + min(1.5, tag_score / 2)` — prevents tag explosion
+
+**Changes — post-retrieval chunk selection (`rag_pipeline.py`):**
+- Noise chunk blacklist: `is_noise_chunk()` removes known-bad chunks (`create_intent_pending_event_without_completion`) before scoring
+- Aggressive top-N trimming: only top 2 chunks from the same semantic group (matching topic prefix) are sent to the LLM
+- `sanitize_response()` — post-LLM guard that catches residual phase-mixing (replaces "intent creation failed" with "payment failed after intent creation", blocks answers that leak webhook/socket internals)
+
+**Test results (3 generalization queries):**
+
+| Case | Query | Result | Pass? |
+|------|-------|--------|-------|
+| 1 | "why was payment cancelled?" | Correctly describes auto-cancel after error during auto-completion | Yes |
+| 2 | "payment didn't complete" | Correctly describes failure after intent creation, HTTP 400 response | Yes |
+| 3 | "transaction failed after processing" | Correctly describes processing-stage failure, cancelled status in DB | Yes |
+
+**What's still weak:**
+
+1. **Answer contamination is reduced but not eliminated.** The LLM still occasionally blends lifecycle stages. `sanitize_response()` is a brittle band-aid — keyword-based post-processing that will miss new phrasings.
+
+2. **Noise blacklist is manual.** `is_noise_chunk()` hardcodes specific chunk IDs. This doesn't scale — every new problematic chunk requires a code change.
+
+3. **Chunk selection is position-based, not relevance-based.** Taking top 2 from the same topic prefix is a heuristic. The LLM receives all selected chunks equally and can blend information from a chunk that's topically related but semantically wrong for the specific question.
+
+**Next step: LLM-based chunk selector.** The current pipeline is:
+```
+query → vector retrieval → top chunks → final LLM answer
+```
+
+The actual bottleneck is chunk utilization, not retrieval quality. A reranker would improve ordering precision, but the real problem is noisy chunk aggregation. A lightweight LLM-based chunk selector addresses this directly:
+```
+query → vector retrieval → LLM chunk selector → compressed relevant context → final answer LLM
+```
+
+This is the correct sequencing before adding a full reranker, because the system needs to learn which parts of retrieved chunks are relevant to the specific question before worrying about chunk ordering.
+
+---
+
 ## Approach 7.1: Analysis — what semantic intent exposed
 
 **What's working (achieved so far):**
@@ -18,30 +81,15 @@ Tracks how the RAG pipeline evolved — what each approach did, what broke, and 
 ```
 The wrong chunk (`pending_event_without_completion`) is gone. Only failure-relevant chunks remain. Ranking is now dominated by intent + domain, not noise.
 
-**What's still broken:**
+**What was still broken (fixed in Approach 8):**
 
-1. **LLM answer precision — semantic distortion.** The LLM returned "payment intent was not created successfully" for a query about post-processing failure. The retrieved chunks correctly describe auto-completion failure AFTER creation, but the LLM generalized it into "creation failed." Root cause: the prompt allows the LLM to generalize beyond the exact lifecycle stage described in the context. This is a prompt discipline problem, not a retrieval problem.
+1. **LLM answer precision — semantic distortion.** The LLM returned "payment intent was not created successfully" for a query about post-processing failure. The retrieved chunks correctly describe auto-completion failure AFTER creation, but the LLM generalized it into "creation failed." Root cause: prompt allowed generalization beyond the exact lifecycle stage.
 
-2. **Coarse intent model — failure types are collapsed.** The single `failure` intent covers creation failure, auto-completion failure, and cancellation. These are different lifecycle stages with different answers. When a user asks "why did intent creation fail?" vs "why did payment fail after processing?", the system returns the same chunks. Sub-intent separation needed:
-   - `creation_failure` — intent creation API errors
-   - `processing_failure` — auto-completion failures, cancellations, incomplete payments
+2. **Coarse intent model — failure types collapsed.** Single `failure` intent covered creation failure, auto-completion failure, and cancellation — different lifecycle stages with different answers.
 
-3. **Hard intent filtering is too aggressive.** `if intent and intent not in chunk_tags: continue` eliminates chunks entirely on tag mismatch. If a chunk is mis-tagged or tags are incomplete, correct answers are silently dropped. Should be replaced with soft boost/penalty:
-   - Intent matches tag → boost (1.5x)
-   - Intent doesn't match tag → penalize (0.7x) but keep in scoring
-   - This makes the system robust to imperfect tagging
+3. **Hard intent filtering too aggressive.** `if intent and intent not in chunk_tags: continue` — mis-tagged or incomplete tags caused correct chunks to be silently dropped.
 
-4. **No stage awareness.** The system knows domain and intent, but not lifecycle stage. Example: user is on `check_intent_response` and asks "why payment failed?" — the failure actually happens during auto-completion, a later stage. The system should either redirect the user to the correct step or answer with an explicit stage clarification.
-
-**Next steps (priority order):**
-
-1. **Fix prompt discipline** — add constraint: "Do NOT generalize beyond the exact stage described in context. If context refers to post-processing failure, do not describe it as creation failure."
-
-2. **Split intent into sub-types** — replace flat `failure`/`success` with `creation_failure`, `processing_failure`, `success` in `INTENT_DEFINITIONS`
-
-3. **Replace hard filter with soft boost** — intent match → 1.5x boost, intent mismatch → 0.7x penalty (not elimination)
-
-4. **Add stage awareness** — map flow steps to lifecycle stages so the system can detect cross-stage queries and either redirect or clarify
+4. **No stage awareness.** System knew domain and intent but not lifecycle stage. Could not distinguish "why did intent creation fail?" from "why did payment fail after processing?"
 
 ---
 

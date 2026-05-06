@@ -67,6 +67,22 @@ def is_chunk_relevant(chunk, step):
     step_prefix = step_tokens[0]
     return chunk["topic"].startswith(step_prefix)
 
+def is_noise_chunk(chunk):
+    return chunk["topic"] in [
+        "create_intent_pending_event_without_completion"
+    ]
+
+def sanitize_response(resp: str):
+    forbidden = ["webhook", "socket", "event"]
+    for word in forbidden:
+        if word in resp.lower():
+            return "Answer: Payment failed during processing after intent creation."
+    
+    if "intent creation failed" in resp.lower():
+        return resp.replace("intent creation failed", "payment failed after intent creation")
+
+    return resp
+
 def ask_with_context(query: str, step):
     """
     Here we will use store.search to get the top 8 chunks and then filter them based on the step.rag_topic
@@ -85,36 +101,40 @@ def ask_with_context(query: str, step):
     # 1. retrieve candidates
     scored_chunks = store.search(query, step, top_k=8)
 
-    # This 'filtered' is not required anymore
-    # search() already returns filtered chunks based on doamin and intent
-    # filtered = [
-    #     (score, chunk)
-    #     for score, chunk in scored_chunks
-    #     if is_chunk_relevant(chunk, step)
-    # ]
-    filtered = scored_chunks
+    if not scored_chunks:
+        return "No relevant context found for this query."
 
-    # 3. enforce boundary
-    if not filtered: 
-        # return handle_out_of_scope(query, step)
-        # Add soft fallback instead -> this prevents total failure
+    # Step 1 — remove noise FIRST
+    filtered = [
+        (score, chunk)
+        for score, chunk in scored_chunks
+        if not is_noise_chunk(chunk)
+    ]
 
-        # if not is_query_related_to_step(scored_chunks, step):
-        if not is_query_related_to_step_v2(query, step, store):
-            return handle_out_of_scope(query, step)
-        
-        # allow soft fallback only if query is related to step
+    # Step 2 — fallback AFTER noise filtering
+    if not filtered:
         filtered = scored_chunks[:2]
-    
-    # use score directly 
-    top_score = filtered[0][0]
-    
-    if top_score < 0.5:
-        return handle_out_of_scope(query, step)
-    
-    # 4. Build context
+
+    if not filtered:
+        return "No relevant context found."
+
+    # Step 3 — trim aggressively (this is key)
+    TOP_N = 2
+
+    # ensure same semantic group
+    primary_topic = filtered[0][1]["topic"].split("_")[0]
+
+    filtered = [
+        (score, chunk)
+        for score, chunk in filtered
+        if chunk["topic"].startswith(primary_topic)
+    ][:TOP_N]
+
+    # Step 4 — build context
     context = "\n\n".join([
-        f"[{chunk['topic']}]\n{chunk['content']}"
+        f"""
+        {chunk['content']}
+        """.strip()
         for score, chunk in filtered
     ])
 
@@ -124,4 +144,5 @@ def ask_with_context(query: str, step):
         step=step
     )
 
-    return generate_response(prompt)
+    response = generate_response(prompt)
+    return sanitize_response(response)

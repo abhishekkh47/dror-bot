@@ -161,7 +161,7 @@ class VectorStore:
                         tag_score += CONTEXT_TAGS.get(tag, 1.0)
             
             # normalize tag_score (prevent explosion)
-            tag_boost = 1 + (tag_score / 4)
+            tag_boost = 1 + min(1.5, tag_score / 2)
 
             # Keyword boost (secondary, minor signal)
             content_tokens = set(chunk.get("content", "").lower().split())
@@ -186,9 +186,27 @@ class VectorStore:
             """
             # adjusted_similarity = similarity_score * topic_boost
             
+            # base_score = similarity_score * importance_boost * type_boost * critical_boost
+            # signal_boost = tag_boost * keyword_boost
+            # final_score = base_score * signal_boost * intent_boost
+            
+            # --- STRONG TAG PRIORITY ---
+            tag_weight = 2.5   # << key change
+
+            # --- INTENT PRIORITY ---
+            intent_weight = 2.0
+
+            # --- REBALANCE ---
             base_score = similarity_score * importance_boost * type_boost * critical_boost
-            signal_boost = tag_boost * keyword_boost
-            final_score = base_score * signal_boost * intent_boost
+
+            tag_component = tag_boost * tag_weight
+            intent_component = intent_boost * intent_weight
+
+            final_score = (
+                base_score * 0.6 +          # reduce embedding dominance
+                tag_component * 0.25 +      # increase tag importance
+                intent_component * 0.15     # intent influence
+            ) * keyword_boost
 
             # Update scoring
             scored.append((final_score, chunk))
