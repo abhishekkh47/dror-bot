@@ -31,3 +31,33 @@ class LifecycleFacts:
     # Optional metadata
     failure_stage: Optional[str] = None
     final_state: Optional[str] = None
+
+    # deterministic normalization layer
+    def infer_derived_state(self):
+        """
+        Apply deterministic lifecycle interfence rules
+
+        Those rules normalize operational truth before prompt generation
+        """
+
+        # Processing implies creation already succeeded 
+        if self.processing_started:
+            self.intent_created = True
+        
+        # Auto completion failure implies processing failure
+        if self.auto_completion_failed:
+            self.processing_started = True
+            self.processing_failed = True
+            self.failure_stage = "auto-completion"
+
+        # Processing failure that later cancels transaction
+        if self.processing_failed and self.transaction_cancelled:
+            self.final_state = "cancelled"
+        
+        # completed processing determines final state
+        if self.processing_completed:
+            self.final_state = "completed"
+
+        # Generic processing failure
+        if self.processing_failed and not self.final_state:
+            self.final_state = "failed"

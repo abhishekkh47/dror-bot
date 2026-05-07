@@ -194,6 +194,78 @@ def build_failure_summary(filtered_chunks):
 
     return summary
 
+def extract_lifecycle_facts(filtered_chunks):
+    """
+    Extract deterministic operational lifecycle facts from retrieved chunks
+
+    This layer exists to:
+    - separate lifecycle reasoning from generation
+    - reduce prompt hallucinations/ambiguity
+    - normalize operational state
+    """
+
+    facts = LifecycleFacts()
+    combined_text = " ".join([
+        chunk["content"].lower()
+        for _, chunk in filtered_chunks
+    ])
+
+    # intent creation indicators
+    if any(phrase in combined_text for phrase in [
+        "intent created successfully",
+        "payment intent created",
+        "platform transaction created",
+    ]):
+        facts.intent_created = True
+
+    # processing indicators
+    if any(phrase in combined_text for phrase in [
+        "auto-completion",
+        "processing",
+        "settlement",
+        "completion stage",
+    ]):
+        facts.processing_started = True
+
+    # failure indicators
+    if any(phrase in combined_text for phrase in [
+        "failed",
+        "error",
+        "http 400",
+        "rollback",
+    ]):
+        facts.processing_failed = True
+    
+    # Auto-completion failure indicators
+    if any(phrase in combined_text for phrase in [
+        "auto-completion failed",
+        "auto-completion error",
+        "auto-completion rollback",
+    ]):
+        facts.auto_completion_failed = True
+
+    # Cancellation indicators
+    if any(phrase in combined_text for phrase in [
+        "cancelled",
+        "cancellation",
+        "status to cancelled",
+    ]):
+        facts.transaction_cancelled = True
+
+    # Completion indicators
+    if any(phrase in combined_text for phrase in [
+        "marked platform transaction as completed",
+        "payment completed successfully",
+        "transaction_completed",
+    ]):
+        facts.processing_completed = True
+
+    # Apply deterministic lifecycle normalization
+    facts.infer_derived_state()
+
+    return facts
+
+    # cancellation indicators
 def ask_with_context(query: str, step):
     """
     Here we will use store.search to get the top 8 chunks and then filter them based on the step.rag_topic
@@ -235,7 +307,8 @@ def ask_with_context(query: str, step):
 
         # Step 4 — build context
         normalized_chunks = []
-        failure_summary = build_failure_summary(filtered)
+        # failure_summary = build_failure_summary(filtered)
+        lifecycle_facts = extract_lifecycle_facts(filtered)
 
         for _, chunk in filtered:
             content = chunk["content"]
@@ -290,7 +363,7 @@ def ask_with_context(query: str, step):
             context=context,
             step=step,
             response_pattern=response_pattern,
-            failure_summary=failure_summary
+            failure_summary=lifecycle_facts
         )
 
         response = generate_response(prompt)
