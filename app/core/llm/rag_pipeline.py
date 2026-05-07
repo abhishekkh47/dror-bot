@@ -384,7 +384,8 @@ def ask_with_context(query: str, step):
             context=context,
             step=step,
             response_pattern=response_pattern,
-            failure_summary=lifecycle_facts
+            failure_summary=lifecycle_facts,
+            operational_evidence=operational_evidence
         )
 
         response = generate_response(prompt)

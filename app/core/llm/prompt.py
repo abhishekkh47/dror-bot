@@ -1,3 +1,6 @@
+from app.utils.prompts import LIFECYCLE_RULES, PROMPT_TEMPLATE, RESPONSE_RULES, SYSTEM_RULES
+
+
 def build_prompt(query: str, context: str) -> str:
     return f"""
     You are a drorpay integration assistant.
@@ -146,166 +149,31 @@ def build_prompt_with_step(
     context: str,
     step,
     response_pattern: str,
-    failure_summary: dict
+    failure_summary: dict,
+    operational_evidence: list[str]
 ) -> str:
-    return f"""
-    You are an API integration assistant.
+    evidence_block = "\n".join([
+        f"- {item}"
+        for item in operational_evidence
+    ])
 
-    Answer the user's question using ONLY the provided context.
+    return PROMPT_TEMPLATE.format(
+        system_rules=SYSTEM_RULES,
 
-    -----------------------------------
-    USER QUESTION
-    -----------------------------------
-    {query}
+        query=query,
 
-    -----------------------------------
-    CURRENT STEP
-    -----------------------------------
-    Step: {step.title}
+        step_title=step.title,
+        step_description=step.description,
 
-    Description:
-    {step.description}
+        intent_created=failure_summary.intent_created,
+        processing_started=failure_summary.processing_started,
+        processing_failed=failure_summary.processing_failed,
+        transaction_cancelled=failure_summary.transaction_cancelled,
+        final_state=failure_summary.final_state,
 
-    -----------------------------------
-    CONTEXT INTERPRETATION
-    -----------------------------------
-    The retrieved context may contain:
-    - failure handling
-    - rollback behavior
-    - cancellation behavior
-    - auto-completion details
-    - processing lifecycle information
-
-    These do NOT necessarily mean:
-    - intent creation failed
-    - transaction creation failed
-
-    Differentiate carefully between:
-    - intent creation
-    - post-creation processing
-    - auto-completion
-    - rollback after processing
-    - final cancellation state
-
-    FACT SUMMARY:
-    - Intent creation confirmed: {failure_summary.intent_created}
-    - Processing started: {failure_summary.processing_started}
-    - Processing failure detected: {failure_summary.processing_failed}
-    - Transaction cancelled: {failure_summary.transaction_cancelled}
-
-    - An HTTP 400 response does NOT necessarily mean intent creation failed.
-    - HTTP 400 may occur after processing has already started.
-
-    LIFECYCLE INFERENCE RULES:
-    - If processing_started = True:
-    assume intent creation already succeeded.
-    - If processing_failed = True:
-    describe the failure as:
-    "processing failure"
-    OR
-    "auto-completion failure"
-    - NEVER describe this as:
-    - intent creation failure
-    - transaction creation failure
-    - If transaction_cancelled = True after processing_started = True:
-    describe cancellation as a RESULT of processing failure.
-    - HTTP 400 after processing_started = True
-    does NOT mean intent creation failed.
-
-    -----------------------------------
-    CONTEXT
-    -----------------------------------
-    {context}
-
-    -----------------------------------
-    RULES
-    -----------------------------------
-    - Use ONLY facts explicitly present in the context.
-    - Do NOT invent APIs, behaviors, statuses, or root causes.
-    - Keep the answer concise and operational.
-    - Prefer concrete operational outcomes over generic summaries.
-    - Do NOT summarize multiple events into a vague generic failure statement if the context contains a more specific operational sequence.
-
-    - Never mention webhooks, socket events, polling, notifications, or internal signaling unless the user's question explicitly asks about events or delivery mechanisms.
-
-    - Do NOT confuse:
-    - intent creation
-    - processing
-    - auto-completion
-    - cancellation
-
-    - HTTP 400, rollback, cancellation, or auto-completion failure do NOT automatically mean intent creation failed.
-
-    - If processing fails AFTER intent creation:
-    NEVER describe it as:
-    "intent creation failed"
-
-    Instead describe:
-    - processing failure
-    - auto-completion failure
-    - post-processing failure
-    depending on context.
-
-    - If the context says intent creation succeeded, never contradict that later in the answer.
-
-    - When explaining failures:
-    explain:
-    1. what failed
-    2. resulting transaction/payment state
-
-    - If the exact low-level technical cause is unclear, describe the operational sequence visible in the context.
-
-    - If the context does not contain the answer, respond EXACTLY with:
-    "The provided context does not contain this information."
-
-    -----------------------------------
-    RESPONSE STYLE
-    -----------------------------------
-    - Maximum 3-5 concise sentences..
-    - No markdown headings.
-    - No bullet points.
-    - No architectural speculation.
-    - No implementation assumptions.
-    - Use precise operational wording.
-    - Preserve timing/stage accuracy from the context.
-
-    - You may infer direct operational cause/effect relationships if they are clearly implied by the context.
-
-    -----------------------------------
-    RESPONSE GUIDANCE
-    -----------------------------------
-    {response_pattern}
-
-    -----------------------------------
-    MANDATORY RESPONSE CONSTRAINTS:
-    -----------------------------------
-    - If processing_started = True:
-    you MUST NEVER say:
-    - "intent creation failed"
-    - "payment intent creation failed"
-    - "transaction creation failed"
-
-    - For incomplete payments, use ONLY phrases like:
-    - "processing failed after intent creation"
-    - "payment did not complete successfully"
-    - "auto-completion failed"
-
-    - If cancellation happened after processing_started = True:
-    describe cancellation as the RESULT of processing failure.
-
-    - Prefer:
-    cause → outcome
-
-    Examples:
-    GOOD:
-    "The payment did not complete successfully because auto-completion failed."
-
-    GOOD:
-    "The transaction was cancelled after processing failed during auto-completion."
-
-    BAD:
-    "The payment intent creation failed."
-    -----------------------------------
-    ANSWER
-    -----------------------------------
-    """.strip()
+        lifecycle_rules=LIFECYCLE_RULES,
+        operational_evidence=evidence_block,
+        context=context,
+        response_rules=RESPONSE_RULES,
+        response_pattern=response_pattern,
+    )

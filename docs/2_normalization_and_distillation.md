@@ -6,7 +6,81 @@ The system is transitioning from **advanced retrieval** to **state-grounded reas
 
 ---
 
-## Step 3.5: Distilled operational evidence layer (current, uncommitted)
+## Step 3.6: Minimal controlled generation — evidence-driven prompts
+
+**What:** Refactored the giant monolithic prompt into structured, separated sections (`SYSTEM_RULES`, `LIFECYCLE_RULES`, `RESPONSE_RULES`, `PROMPT_TEMPLATE`). Removed duplicated lifecycle reasoning rules that are now enforced structurally by `LifecycleFacts`, contradiction resolution, and operational evidence. The prompt's role shifted from validator/reasoner/suppressor to **evidence interpreter**.
+
+**Key architectural shift:**
+- Before: `Prompt → tries to enforce truth`
+- After: `Architecture → establishes truth, Prompt → renders truth`
+
+The prompt no longer performs lifecycle reasoning, chronology reconstruction, or contradiction suppression. Those are now handled by dedicated layers. The prompt only defines behavior policy.
+
+**The trap this step avoids:** Most people aggressively delete prompt rules after building architectural grounding, thinking "the architecture handles it now." That causes regressions because evidence extraction is still imperfect, retrieval still occasionally leaks noise, and operational nuance still exists in raw chunks. This step is **prompt simplification**, NOT prompt elimination.
+
+**Key changes:**
+
+`prompt.py` — refactored into separated sections:
+- `SYSTEM_RULES` — role definition, evidence-only constraint, no speculation, no internal leakage
+- `LIFECYCLE_RULES` — processing requires creation, cancellation implies failure, never describe post-processing failure as creation failure, terminal state consistency
+- `RESPONSE_RULES` — concise operational answers, no infra details unless asked, state insufficient evidence when needed
+- `PROMPT_TEMPLATE` — clean assembly: system rules → lifecycle rules → response rules → operational evidence → supporting context → query → answer
+
+**Responsibility hierarchy after this step:**
+
+| Layer | Responsibility |
+|-------|---------------|
+| Retrieval | Relevant evidence |
+| LifecycleFacts | Operational state |
+| ContradictionResolver | Lifecycle consistency |
+| OperationalEvidence | Grounded truth |
+| Prompt | Concise rendering constraints |
+| Sanitizer | Final cleanup safety net |
+
+**What was removed from prompts:**
+- Duplicated lifecycle rules like "never say intent creation failed after processing" — now enforced by contradiction resolution + operational evidence
+- Chronology reconstruction guidance — now handled by `infer_derived_state()`
+- Contradiction warnings — now handled by `resolve_contradictions()`
+- Wording patches — now handled by operational distiller
+
+**What was kept:**
+- Anti-speculation rules (policy constraint)
+- No-internal-leakage rules (policy constraint)
+- Concise-response rules (policy constraint)
+
+These are **behavior policy**, not lifecycle reasoning. Important distinction — prompts should define behavior policy, NOT operational truth inference.
+
+**Why structured sections matter:** Mixed prompts are hard to debug, hard to version, hard to evaluate, and prone to instruction conflicts. Separated sections enable: easier debugging (which section caused the regression?), easier governance (version each section independently), easier evaluation (test policy rules vs lifecycle rules separately), lower instruction collision risk.
+
+**Expected effects (without adding more prompt complexity):**
+- More stable outputs, fewer contradictory sentences
+- Less over-explanation, shorter responses
+- Less hallucinated chronology, more deterministic behavior
+- Signal that architecture is replacing prompting
+
+**What this step did NOT change:**
+- Did not remove sanitizer — stays as final safety net
+- No reranking, graph reasoning, multi-agent decomposition, model routing, or fine-tuning
+- Current bottleneck is evidence quality and evaluation, not retrieval sophistication
+
+**Result:** The system now resembles enterprise support AI infrastructure instead of giant-prompt RAG. This aligns with the "Prompt Governance & Versioning" and "Enterprise RAG Pipeline" progression.
+
+**Next step:** Step 3.7 — Evaluation & Regression Framework. Once architecture becomes layered, deterministic regression detection becomes critical. Evals matter more than prompts at this stage — one of the clearest markers of moving from prototype GenAI into production-grade AI engineering.
+
+**Current flow**
+Retrieval
+→ Chunk Selection
+→ Lifecycle Extraction
+→ Contradiction Resolution
+→ Operational Distillation
+→ Operational Evidence
+→ Prompt Assembly
+→ Generation
+→ Sanitization
+
+---
+
+## Step 3.5: Distilled operational evidence layer
 **What:** Introduced a structured evidence builder that converts normalized `LifecycleFacts` into explicit operational truth statements. These statements are prepended to the context as `OPERATIONAL_EVIDENCE`, with raw chunk text demoted to `SUPPORTING_CONTEXT`. The LLM now receives a dual-context grounding hierarchy: evidence first, chunks second.
 **Why this is the most important transition so far:** Up to now, the generator was still fundamentally operating on paragraph-oriented text — even if cleaner after distillation. The model still parsed paragraphs, reconstructed meaning, prioritized signals, inferred causality, and decided what matters. Too much implicit reasoning inside generation. After this step, the LLM is no longer *interpreting chunks* — it is *rendering grounded evidence*. The system stops behaving like "RAG + prompt engineering" and starts behaving like a **state-grounded reasoning pipeline**.
 **Key changes:**
