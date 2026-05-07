@@ -2,35 +2,125 @@
 
 Tracks how the RAG pipeline evolved — what each approach did, what broke, and why we moved on.
 
+**System identity shift:** This is no longer a "RAG chatbot." It is a **constrained state-transition reasoning engine with retrieval augmentation**. That distinction changes what the next layer should look like.
+
 **Current pipeline (as of Approach 10):**
 ```
 User Query → Retrieval → Ranking → Chunk Selection → Prompt Assembly → LLM Generation → Response Sanitization
 ```
 
-**Next evolution:**
+**Next evolution (corrected — NOT naive compression):**
 ```
-User Query → Retrieval → Ranking → Chunk Selection → Context Compression → Prompt Assembly → LLM Generation → Response Sanitization
+User Query → Retrieval → Ranking → Chunk Selection → Lifecycle Fact Extraction → Contradiction Resolution → Operational Distillation → Prompt Assembly → LLM Generation → Response Sanitization
 ```
 
-Context compression sits between chunk selection and prompt assembly. This is still RAG — specifically, it is the next layer in a mature RAG pipeline called **structured retrieval orchestration**.
-
-**Why context compression is needed:** Retrieval is correct, but raw chunks still contain ~80% noise (webhook details, socket events, DB internals, rollback mechanics). The LLM sees this noise and leaks internals, hallucinating causal chains and mixing stages. Currently compensated by prompt rules and sanitizers — that works temporarily but scales badly. Context compression distills raw chunks into clean, query-relevant summaries before the answer LLM sees them.
-
-**Example of what compression does:**
-
-Raw chunk:
-> Socket event payment-status-update is emitted during DB transaction. If auto-completion later fails, transaction status becomes CANCELLED. Webhook payment.created is not sent. API returns HTTP 400.
-
-Distilled chunk:
-> Auto-completion failed after processing started, resulting in transaction cancellation.
-
-Lower entropy, less implementation noise, clearer lifecycle signal, less hallucination opportunity.
+This replaces the earlier "context compression" plan. Naive summarization would collapse lifecycle boundaries and reintroduce the exact contradictions we spent weeks eliminating (e.g. "payment creation failed and transaction was cancelled" — wrong). The correct evolution is **structured operational distillation**.
 
 **Maturity progression:**
 - ~~Naive vector search~~ (Approach 2)
 - ~~Basic semantic retrieval~~ (Approach 5)
 - ~~Simple chunk stuffing~~ (Approach 8)
-- **Current: Structured retrieval orchestration** — context shaping, lifecycle grounding, reasoning control, compression, reranking
+- ~~Structured retrieval orchestration~~ (Approach 10)
+- **Current transition: Advanced retrieval system → State-grounded reasoning engine**
+
+---
+
+## Architecture Review — full system assessment after Approach 10
+
+### What's already solved
+
+**Retrieval stack** — sophisticated and stable:
+- Domain hard-filtering
+- Semantic similarity
+- Tag weighting + intent semantic mapping
+- Chunk selection + lifecycle grounding + response sanitization
+
+The key improvement was NOT embeddings. It was **lifecycle semantics**, **operational state separation**, and **contradiction prevention**. That's the real hard part in enterprise RAG. The architecture now behaves as `retrieval → constrained operational reasoning` instead of `retrieval → freeform generation`.
+
+**Retrieval scoring** — solid. Domain hard-filtering, semantic intent detection, weighted tag scoring, soft intent boosting, critical tag amplification. Good decision avoiding hard intent filtering (would have broken "payment didn't complete" due to phrasing variability). Retrieval is "good enough" for current scale. Do not over-engineer reranking yet.
+
+**Flow system** — correctly structured. The `domain: ["payment"]` decision (instead of pure `rag_topic` matching) gives lifecycle grouping, contextual filtering, and semantic flexibility.
+
+### Current bottleneck: prompt-architecture limits
+
+The prompt has become extremely dense with overlapping/conflicting rules:
+- Lifecycle rules + negative constraints + response style rules
+- Anti-webhook leakage rules + contradiction prevention
+- Timing semantics + operational phrasing + inference rules + forbidden phrases
+
+Failure mode: **prompt rule collisions**. Example: one rule says "only explicit facts", another says "infer operational cause/effect", another says "don't generalize", another says "describe processing failure." These conflict under noisy context.
+
+### Structural weakness: the LLM is doing too much
+
+Currently: `retrieved chunks → normalized text → giant prompt → LLM synthesis`
+
+The model still performs:
+- Chronology reconstruction
+- Causal synthesis
+- Abstraction
+- State inference
+
+All from implementation-heavy chunks that contain socket sequencing, webhook ordering, rollback mechanics, audit events, DB transaction stages, notification internals. Currently suppressed via penalties, selectors, prompt constraints, sanitizers — works but fragile.
+
+### The chunk corpus is the real hidden problem
+
+Chunks are too implementation-coupled. A single chunk often contains lifecycle facts, infra behavior, socket behavior, webhook behavior, operational outcome, audit behavior, and timing semantics mixed together. That's poison for grounded synthesis.
+
+### Sanitizer is becoming a hidden secondary prompt (danger)
+
+Regex rewriting is now changing semantic meaning: `"intent creation failed" → "processing failed after intent creation"`. Useful as a safety net, but if sanitization becomes responsible for semantic correctness, generation quality becomes impossible to reason about. Sanitization should: remove leakage, normalize wording, clean formatting. NOT: repair core reasoning.
+
+### The seed of the correct architecture already exists
+
+`build_failure_summary(filtered_chunks)` is the most important architectural component — it moves from unstructured retrieval toward structured state inference. Currently primitive (keyword-based, boolean flags, shallow extraction), but conceptually correct. Should evolve into:
+
+```python
+LifecycleState(
+    intent_created=True,
+    processing_started=True,
+    processing_failed=True,
+    transaction_cancelled=True,
+    completion_confirmed=False,
+    rollback_detected=True,
+    user_cancelled=False,
+    auto_cancelled=True
+)
+```
+
+### What to build next (corrected plan)
+
+NOT naive compression/summarization. Instead:
+
+**Layer 1 — Lifecycle Fact Extractor:** Convert chunks into structured facts:
+```json
+{
+  "facts": [
+    { "type": "intent_creation", "status": "succeeded" },
+    { "type": "processing", "status": "failed" },
+    { "type": "transaction", "status": "cancelled" }
+  ]
+}
+```
+
+**Layer 2 — Contradiction Resolver:** Deterministic rules:
+- `processing_started` ⇒ `intent_created`
+- `completed` ⇒ NOT `cancelled`
+- `cancelled_after_processing` ⇒ `auto_completion_failure`
+
+This is the real missing layer — pre-generation contradiction resolution instead of implicit prompt/sanitizer handling.
+
+**Layer 3 — Operational Distiller:** Convert raw events into customer-safe summary WITHOUT infra leakage. Extract operational facts, customer-safe facts, lifecycle events, integration-safe outcomes. Discard observability details, infra sequencing, transport details (unless explicitly requested).
+
+**Layer 4 — Tiny Generation Prompt:** Final prompt becomes dramatically smaller:
+```
+Use only provided distilled operational facts.
+Answer concisely.
+Do not speculate.
+```
+
+Instead of 150+ lines of behavioral constraints. That's where stable enterprise RAG systems end up — not giant prompts.
+
+This changes the LLM's role from **reasoning engine** to **language renderer**. Huge difference.
 
 ---
 
