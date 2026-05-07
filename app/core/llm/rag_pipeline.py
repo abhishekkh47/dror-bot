@@ -1,8 +1,9 @@
 from app.core.llm.chunk_selector import select_relevant_chunks
+from app.core.llm.operational_distiller import distill_chunks
 from app.core.llm.retriever import retrieve_context, store
 from app.core.llm.prompt import build_prompt, build_prompt_with_step
 from app.core.llm.llm import generate_response
-from app.utils.constants import RESPONSE_PATTERNS, CONTRADICTION_PATTERNS, CLEANUP_PATTERNS, INTERNAL_PATTERNS
+from app.utils.patterns import RESPONSE_PATTERNS, CONTRADICTION_PATTERNS, CLEANUP_PATTERNS, INTERNAL_PATTERNS
 from app.utils.logger import logger
 from app.core.llm.lifecycle_facts import LifecycleFacts
 import numpy as np
@@ -306,15 +307,16 @@ def ask_with_context(query: str, step):
         if not filtered:
             filtered = scored_chunks[:2]
 
-        # Step 4 — build context
-        normalized_chunks = []
         # failure_summary = build_failure_summary(filtered)
         lifecycle_facts = extract_lifecycle_facts(filtered)
 
-        for _, chunk in filtered:
+        distilled_chunks = distill_chunks(filtered)
+
+        # Step 4 — build context
+        normalized_chunks = []
+        for chunk in distilled_chunks:
             content = chunk["content"]
 
-            # normalize misleading phrases
             replacements = {
                 "payment intent creation failed":
                     "payment processing failed after intent creation",

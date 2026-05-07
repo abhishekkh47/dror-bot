@@ -6,7 +6,70 @@ The system is transitioning from **advanced retrieval** to **state-grounded reas
 
 ---
 
-## Step 3.3: Contradiction resolution engine (current, uncommitted)
+## Step 3.4: Operational distillation layer (current, uncommitted)
+
+**What:** Added a deterministic pre-generation context shaping layer that transforms raw implementation-heavy chunks into clean operational evidence. This is the "context compression" step originally planned — but done correctly now that lifecycle facts, inference, and contradiction resolution are in place. Without those foundations, this would have been naive summarization that destroys lifecycle correctness.
+
+**What this is NOT:** Text compression, LLM summarization, or chunk shortening. Summarization collapses lifecycle boundaries, invents causality, and destroys chronology. This is **operational abstraction** — preserving lifecycle meaning while removing implementation mechanics.
+
+**The problem this solves:** Even with chunk selection, noise penalties, prompts, and sanitization, the generator still received raw chunks containing socket mechanics, webhook ordering, audit logging, DB transaction behavior, room joins, retry semantics. The model sees ~80% implementation noise and starts leaking internals, over-explaining, and hallucinating causal chains.
+
+**Key changes:**
+
+New file `operational_distiller.py`:
+- `NOISE_PATTERNS` — regex patterns for implementation noise: socket internals, webhook/callback details, audit/logging, DB transaction/wallet lock mechanics, push notifications, WhatsApp
+- `clean_operational_text(text)` — removes lines matching noise patterns while preserving lifecycle-relevant lines. Deterministic, no LLM involved
+- `distill_chunks(filtered_chunks)` — applies `clean_operational_text` to each chunk, returns cleaned chunks with topic/tags preserved
+
+`rag_pipeline.py`:
+- Inserted `distill_chunks(filtered)` between chunk selection and context assembly
+- Context builder now loops over distilled chunks instead of raw filtered chunks
+- Added lifecycle-safe wording replacements in context normalization (e.g. "payment intent creation failed" → "payment processing failed after intent creation") — applied to distilled content before prompt assembly
+
+**Pipeline becomes:**
+```
+Retrieval → Chunk Selection → Lifecycle Extraction → Contradiction Resolution → Operational Distillation → Prompt Assembly → Generation
+```
+
+Previously: `raw retrieval → prompt`. Now: `retrieval → operational abstraction → prompt`.
+
+**Why deterministic, not LLM-based:** Summarization destroys chronology, invents causality, and collapses lifecycle stages. Deterministic regex filtering is conservative but safe. Only later, once behavior is observed, can abstraction models be safely added.
+
+**Design rule — what to keep vs remove:**
+
+| Keep | Remove |
+|------|--------|
+| Processing failed | Socket events |
+| Transaction cancelled | Webhook ordering |
+| Auto-completion failed | Room joins |
+| Lifecycle chronology | Retry semantics |
+| Causal transitions | DB locks / wallet locks |
+| Failure semantics | Audit logging |
+| | Push notifications / WhatsApp |
+
+Unless the user explicitly asks about those implementation details.
+
+**Important:** This first version is intentionally conservative — only removes obvious implementation noise. Over-filtering can accidentally strip lifecycle chronology, causal transitions, or failure semantics. Behavior needs to be observed before aggressive stripping.
+
+**Expected effects (without changing prompts):**
+- Shorter answers
+- Less infra leakage
+- Less webhook/socket discussion
+- More lifecycle-focused answers
+- Cleaner operational phrasing
+
+**What this step did NOT change:**
+- Did not remove prompt constraints or sanitizers — safety redundancy stays
+- Did not add LLM summarization or abstraction models
+- Noise patterns are conservative, not aggressive
+
+**Result:** First pre-generation context shaping layer. The generator now receives operationally-cleaned evidence instead of raw implementation-heavy chunks.
+
+**Next step:** Step 3.5 — Distilled Operational Fact Generation. Prompt size shrinks dramatically, raw chunk text becomes secondary, generation relies primarily on lifecycle facts + distilled operational evidence. The system begins behaving like a grounded reasoning engine instead of a constrained summarizer.
+
+---
+
+## Step 3.3: Contradiction resolution engine
 
 **What:** Split `infer_derived_state()` into two separate responsibilities: inference (deriving implied facts) and contradiction resolution (enforcing operational consistency). Added `resolve_contradictions()` method to `LifecycleFacts` that prevents impossible lifecycle states BEFORE generation. Pipeline now runs: raw extraction → inferred relationships → contradiction normalization.
 
