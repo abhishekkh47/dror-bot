@@ -262,6 +262,7 @@ def extract_lifecycle_facts(filtered_chunks):
 
     # Apply deterministic lifecycle normalization
     facts.infer_derived_state()
+    facts.resolve_contradictions()
 
     return facts
 

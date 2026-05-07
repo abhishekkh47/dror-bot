@@ -6,6 +6,47 @@ The system is transitioning from **advanced retrieval** to **state-grounded reas
 
 ---
 
+## Step 3.3: Contradiction resolution engine (current, uncommitted)
+
+**What:** Split `infer_derived_state()` into two separate responsibilities: inference (deriving implied facts) and contradiction resolution (enforcing operational consistency). Added `resolve_contradictions()` method to `LifecycleFacts` that prevents impossible lifecycle states BEFORE generation. Pipeline now runs: raw extraction → inferred relationships → contradiction normalization.
+
+**Key architectural shift:** Before this step, contradictions were handled by prompts ("never say intent creation failed") and sanitizers (regex rewriting). That's too late — the generator could still receive invalid state. After this step, the system makes contradictory states impossible before the prompt even exists. The generator NEVER receives invalid state.
+
+**Examples of contradictions this prevents:**
+
+| Contradiction | Why impossible | Resolution |
+|---------------|---------------|------------|
+| `processing_started=True` + `intent_created=False` | Processing cannot start before creation | Force `intent_created=True` |
+| `processing_completed=True` + `transaction_cancelled=True` | Completed transactions cannot be cancelled | Force `transaction_cancelled=False` |
+| `processing_completed=True` + `processing_failed=True` | Conflicting terminal states | Completion wins — force `processing_failed=False` |
+| `auto_completion_failed=True` + `processing_started=False` | Impossible lifecycle ordering | Force `processing_started=True` |
+| `failure_stage="intent_creation"` + `processing_started=True` | If processing started, creation succeeded | Force `failure_stage="processing"` |
+
+**Design decision — completion wins:** `processing_completed` has highest precedence in terminal state resolution. Completion is terminal truth. This is intentional deterministic precedence — without it, state becomes ambiguous.
+
+**Key changes:**
+
+`lifecycle_facts.py`:
+- `resolve_contradictions()` added — enforces operational consistency: processing implies creation, completion clears failure/cancellation flags, cancelled+failed resolves to "cancelled", contradictory terminal combinations are cleaned
+- `infer_derived_state()` cleaned — now only infers implied relationships, no longer performs contradiction repair. Inference and normalization are separate responsibilities
+
+`rag_pipeline.py`:
+- `extract_lifecycle_facts()` now calls both in sequence: `facts.infer_derived_state()` then `facts.resolve_contradictions()`. Order matters — normalization must operate on fully inferred state, not incomplete state
+
+**Why separation matters:** Inference (`infer_derived_state`) answers: "what else must be true given these facts?" Contradiction resolution (`resolve_contradictions`) answers: "which facts are impossible together and how do we resolve them?" Combining these creates hidden coupling. Separating them makes each independently testable and debuggable.
+
+**What this step begins:** Formalizing operational state machine semantics. This is the real core of enterprise reasoning systems — not embeddings, not prompts. State semantics.
+
+**What this step did NOT change:**
+- Did not remove prompt constraints or sanitizers — safety redundancy stays during transition
+- No compression, no summarization, no event graphing, no prompt simplification
+
+**Result:** Before: prompt tries to avoid contradictions. After: system prevents contradictory state before prompt exists. Major production-grade transition.
+
+**Next step:** Step 3.4 — Operational Distillation Layer. Transform raw implementation-heavy chunks into clean operational evidence before generation. NOT text compression — transforming operational evidence into grounded abstractions.
+
+---
+
 ## Step 3.2: Fact extraction engine + deterministic lifecycle inference
 
 **What:** Evolved `LifecycleFacts` from a passive data container into a deterministic lifecycle inference layer. Added `infer_derived_state()` method that applies normalization rules before generation. Renamed `build_failure_summary()` to `extract_lifecycle_facts()` to reflect the shift from vague summarization to deterministic state extraction. Added auto-completion failure detection and completion indicators.

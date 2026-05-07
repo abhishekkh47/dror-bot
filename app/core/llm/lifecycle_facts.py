@@ -51,7 +51,7 @@ class LifecycleFacts:
             self.failure_stage = "auto-completion"
 
         # Processing failure that later cancels transaction
-        if self.processing_failed and self.transaction_cancelled:
+        if self.transaction_cancelled:
             self.final_state = "cancelled"
         
         # completed processing determines final state
@@ -59,5 +59,52 @@ class LifecycleFacts:
             self.final_state = "completed"
 
         # Generic processing failure
-        if self.processing_failed and not self.final_state:
+        if self.processing_failed:
             self.final_state = "failed"
+
+    def resolve_contradictions(self):
+        """
+        Resolve impossible or conflicting lifecycle states.
+
+        This layer enforces operational consistency
+        BEFORE generation.
+        """
+
+        # Processing cannot happen before creation
+        if self.processing_started:
+            self.intent_created = True
+
+        # Auto-completion failure implies processing failure
+        if self.auto_completion_failed:
+            self.processing_started = True
+            self.processing_failed = True
+
+        # Completed transactions cannot simultaneously fail
+        if self.processing_completed:
+            self.processing_failed = False
+            self.auto_completion_failed = False
+
+        # Completed transactions cannot be cancelled
+        if self.processing_completed:
+            self.transaction_cancelled = False
+
+        # Cancelled after processing failure
+        if self.transaction_cancelled and self.processing_failed:
+            self.final_state = "cancelled"
+
+        # Completed state wins terminal resolution
+        elif self.processing_completed:
+            self.final_state = "completed"
+
+        # Failed state fallback
+        elif self.processing_failed:
+            self.final_state = "failed"
+
+        # Prevent impossible stage labeling
+        if self.failure_stage == "intent_creation" and self.processing_started:
+            self.failure_stage = "processing"
+
+        # Prevent contradictory terminal combinations
+        if self.final_state == "completed":
+            self.transaction_cancelled = False
+            self.processing_failed = False
