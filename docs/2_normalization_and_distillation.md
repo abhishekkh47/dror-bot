@@ -6,6 +6,30 @@ The system is transitioning from **advanced retrieval** to **state-grounded reas
 
 ---
 
+## Step 3.5: Distilled operational evidence layer (current, uncommitted)
+**What:** Introduced a structured evidence builder that converts normalized `LifecycleFacts` into explicit operational truth statements. These statements are prepended to the context as `OPERATIONAL_EVIDENCE`, with raw chunk text demoted to `SUPPORTING_CONTEXT`. The LLM now receives a dual-context grounding hierarchy: evidence first, chunks second.
+**Why this is the most important transition so far:** Up to now, the generator was still fundamentally operating on paragraph-oriented text — even if cleaner after distillation. The model still parsed paragraphs, reconstructed meaning, prioritized signals, inferred causality, and decided what matters. Too much implicit reasoning inside generation. After this step, the LLM is no longer *interpreting chunks* — it is *rendering grounded evidence*. The system stops behaving like "RAG + prompt engineering" and starts behaving like a **state-grounded reasoning pipeline**.
+**Key changes:**
+New file `operational_evidence.py`:
+- `build_operational_evidence(facts: LifecycleFacts)` — converts each lifecycle fact into a plain operational statement: `intent_created=True` → "payment intent creation succeeded", `auto_completion_failed=True` → "auto-completion failed during processing", `final_state="cancelled"` → "final transaction state is cancelled"
+`rag_pipeline.py`:
+- After `extract_lifecycle_facts()` and `resolve_contradictions()`, calls `build_operational_evidence(lifecycle_facts)`
+- Context assembly now builds dual-context:
+  ```
+  OPERATIONAL_EVIDENCE:
+  - payment intent creation succeeded
+  - processing started
+  - auto-completion failed
+  - transaction cancelled after processing failure
+  SUPPORTING_CONTEXT:
+  <distilled chunk text>
+  ```
+- Evidence becomes primary grounding, raw chunks become secondary (for nuance only)
+**Before vs after — what the LLM sees:**
+Before:
+
+---
+
 ## Step 3.4: Operational distillation layer (current, uncommitted)
 
 **What:** Added a deterministic pre-generation context shaping layer that transforms raw implementation-heavy chunks into clean operational evidence. This is the "context compression" step originally planned — but done correctly now that lifecycle facts, inference, and contradiction resolution are in place. Without those foundations, this would have been naive summarization that destroys lifecycle correctness.

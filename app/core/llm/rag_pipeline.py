@@ -1,5 +1,6 @@
 from app.core.llm.chunk_selector import select_relevant_chunks
 from app.core.llm.operational_distiller import distill_chunks
+from app.core.llm.operational_evidence import build_operational_evidence
 from app.core.llm.retriever import retrieve_context, store
 from app.core.llm.prompt import build_prompt, build_prompt_with_step
 from app.core.llm.llm import generate_response
@@ -312,6 +313,10 @@ def ask_with_context(query: str, step):
 
         distilled_chunks = distill_chunks(filtered)
 
+        operational_evidence = build_operational_evidence(
+            lifecycle_facts
+        )
+
         # Step 4 — build context
         normalized_chunks = []
         for chunk in distilled_chunks:
@@ -353,7 +358,20 @@ def ask_with_context(query: str, step):
             {content}
             """.strip())
 
-        context = "\n\n".join(normalized_chunks)
+        evidence_block = "\n".join([
+            f"- {item}"
+            for item in operational_evidence
+        ])
+
+        raw_context = "\n\n".join(normalized_chunks)
+
+        context = f"""
+        OPERATIONAL_EVIDENCE:
+        {evidence_block}
+
+        SUPPORTING_CONTEXT:
+        {raw_context}
+        """.strip()
 
         response_intent = detect_response_intent(query)
         response_pattern = RESPONSE_PATTERNS.get(
