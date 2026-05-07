@@ -4,6 +4,70 @@ Tracks how the RAG pipeline evolved — what each approach did, what broke, and 
 
 ---
 
+## Approach 10: Stage complete — response normalization layer 
+
+**What:** Iterated on response normalization (contradiction suppression, lifecycle phrasing, defensive output cleaning) until the remaining issues were surface-form imperfections, not architectural problems. Closed this stage.
+
+**The pipeline is now a five-layer architecture:**
+1. **Retrieval** — semantic search with domain gating, intent-aware ranking
+2. **Grounding** — LLM chunk selector compresses context to 1-2 directly relevant chunks
+3. **Reasoning** — lifecycle-aware prompt with query interpretation, cause → outcome ordering
+4. **Contradiction suppression** — prevents the LLM from contradicting its own context (e.g. saying "intent creation failed" when the context says it succeeded)
+5. **Response normalization** — surgical post-processing for surface-form corrections only
+
+**Test results (final for this stage):**
+
+| Case | Query | Status | Notes |
+|------|-------|--------|-------|
+| 1 | "why was payment cancelled?" | Correct | Minor stylistic over-inference ("invalid state"), but lifecycle logic is correct |
+| 2 | "payment didn't complete" | Correct | Clean response |
+| 3 | "transaction failed after processing" | Correct | Minor unnecessary defensive phrasing ("context does not provide..."), but semantics are correct |
+
+**What's stable:**
+- Retrieval layer — stable
+- Grounding layer — stable
+- Lifecycle reasoning — stable
+- Contradiction suppression — stable
+- Intent-aware phrasing — working
+- Response normalization — stable enough for next stage
+
+**What's imperfect but acceptable:**
+- Case 1: "invalid state where the payment could not be processed" — stylistic over-inference, not a factual error
+- Case 3: "the context does not provide any information about intent creation" — unnecessary defensive phrasing, but lifecycle logic is correct
+
+These are surface-level imperfections, not architectural failures. Stage confusion is gone. Contradiction is gone. Retrieval grounding is working. Semantic intent mapping is working.
+
+**Why this stage is closed (important):**
+
+Continuing to patch here means:
+- Overfitting to 3 test cases
+- Prompt complexity explosion
+- Sanitizer logic becoming fragile
+- Normal user queries degrading
+
+The remaining issues are caused by **verbose raw chunks** and **noisy implementation detail leakage** — not retrieval failure. That distinction matters because it points to the correct next stage.
+
+**What NOT to do now:**
+- Do NOT add more regex sanitizers
+- Do NOT add more prompt rules
+- Do NOT add more special-case conditions
+- These are optimization traps with diminishing returns
+
+**Correct next stage: Context compression / context distillation.** Instead of sending raw chunks to the answer LLM, compress them into clean, query-relevant summaries first. This attacks the actual remaining problem (contextual entropy from verbose chunks) rather than papering over it with more prompt rules or sanitizers.
+
+**System capability at stage close:**
+- Semantic retrieval
+- Domain gating
+- Intent-aware ranking
+- Chunk selection
+- Lifecycle grounding
+- Contradiction suppression
+- Response normalization
+
+This is beyond basic RAG architecture.
+
+---
+
 ## Approach 9.1: From semantic collapse to query-aware answering
 
 **What:** After fixing hallucination and timeline corruption (Approach 9), the system overcorrected into semantic collapse — all 3 test queries produced the identical safe response: "payment failed during processing after intent creation." The model learned to repeat the one canonical sentence that satisfied all prompt constraints, losing query specificity, answer richness, and causal differentiation.

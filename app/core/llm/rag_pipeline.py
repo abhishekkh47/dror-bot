@@ -2,6 +2,7 @@ from app.core.llm.chunk_selector import select_relevant_chunks
 from app.core.llm.retriever import retrieve_context, store
 from app.core.llm.prompt import build_prompt, build_prompt_with_step
 from app.core.llm.llm import generate_response
+from app.utils.constants import RESPONSE_PATTERNS, CONTRADICTION_PATTERNS, CLEANUP_PATTERNS, INTERNAL_PATTERNS
 from app.utils.logger import logger
 import numpy as np
 import re
@@ -76,33 +77,126 @@ def is_noise_chunk(chunk):
     ]
 
 def sanitize_response(resp: str):
+    forbidden = ["internal vector", "embedding", "retrieval score"]
 
-    forbidden_patterns = [
-        r"webhook",
-        r"socket",
-        r"polling",
-        r"internal signal",
-    ]
+    for word in forbidden:
+        resp = resp.replace(word, "")
 
-    # Remove forbidden sentences
-    sentences = re.split(r'(?<=[.!?])\s+', resp)
-    cleaned = []
+    for pattern, replacement in CONTRADICTION_PATTERNS.items():
+        resp = re.sub(
+            pattern,
+            replacement,
+            resp,
+            flags=re.IGNORECASE
+        )
+    
+    for pattern in CLEANUP_PATTERNS:
+        resp = re.sub(
+            pattern,
+            "",
+            resp,
+            flags=re.IGNORECASE
+        )
 
-    for sentence in sentences:
-        lower = sentence.lower()
-        if any(p in lower for p in forbidden_patterns):
-            continue
-        cleaned.append(sentence)
+    for pattern in INTERNAL_PATTERNS:
+        resp = re.sub(
+            pattern,
+            "",
+            resp,
+            flags=re.IGNORECASE
+        )
+    resp = re.sub(r'\s+', ' ', resp).strip()
 
-    resp = " ".join(cleaned).strip()
-    # factual correction only
-    resp = re.sub(
-        r"intent creation failed",
-        "processing failed after intent creation",
-        resp,
-        flags=re.IGNORECASE
-    )
-    return resp
+    return resp.strip()
+
+def detect_response_intent(query: str):
+    q = query.lower()
+
+    # WHY something got cancelled
+    if any(x in q for x in [
+        "why cancelled",
+        "why was payment cancelled",
+        "cancelled"
+    ]):
+        return "cancellation_reason"
+
+    # payment did not complete
+    if any(x in q for x in [
+        "didn't complete",
+        "not complete",
+        "did not complete",
+        "payment incomplete"
+    ]):
+        return "completion_failure"
+
+    # failed after processing started
+    if any(x in q for x in [
+        "failed after processing",
+        "after processing",
+        "processing failed"
+    ]):
+        return "post_processing_failure"
+
+    return "generic_failure"
+
+def build_failure_summary(filtered_chunks):
+    """
+    Extract structured lifecycle facts from retrieved chunks.
+
+    This prevents the LLM from incorrectly mixing:
+    - intent creation
+    - processing
+    - auto-completion
+    - cancellation
+    """
+
+    summary = {
+        "intent_created": False,
+        "processing_started": False,
+        "processing_failed": False,
+        "transaction_cancelled": False,
+    }
+
+    combined_text = " ".join([
+        chunk["content"].lower()
+        for _, chunk in filtered_chunks
+    ])
+
+    # creation success indicators
+    if any(phrase in combined_text for phrase in [
+        "intent created successfully",
+        "payment intent created",
+        "platform transaction created",
+    ]):
+        summary["intent_created"] = True
+
+    # processing indicators
+    if any(phrase in combined_text for phrase in [
+        "auto-completion",
+        "processing",
+        "settlement",
+        "completion stage",
+    ]):
+        summary["processing_started"] = True
+
+    # failure indicators
+    if any(phrase in combined_text for phrase in [
+        "failed",
+        "error",
+        "http 400",
+        "rollback",
+    ]):
+        summary["processing_failed"] = True
+
+    # cancellation indicators
+    if any(phrase in combined_text for phrase in [
+        "cancelled",
+        "cancellation",
+        "status to cancelled",
+    ]):
+        summary["transaction_cancelled"] = True
+
+    return summary
 
 def ask_with_context(query: str, step):
     """
@@ -144,15 +238,63 @@ def ask_with_context(query: str, step):
             filtered = scored_chunks[:2]
 
         # Step 4 — build context
-        context = "\n\n".join([
-            chunk['content']
-            for _, chunk in filtered
-        ])
+        normalized_chunks = []
+        failure_summary = build_failure_summary(filtered)
+
+        for _, chunk in filtered:
+            content = chunk["content"]
+
+            # normalize misleading phrases
+            replacements = {
+                "payment intent creation failed":
+                    "payment processing failed after intent creation",
+
+                "intent creation failed":
+                    "processing failed after intent creation",
+
+                "payment intent creation failed after processing":
+                    "payment processing failed after intent creation",
+
+                "intent was not created successfully":
+                    "payment processing did not complete successfully",
+
+                "payment intent was not created successfully":
+                    "payment processing did not complete successfully",
+
+                "transaction creation failed":
+                    "transaction processing failed",
+            }
+
+            for wrong, correct in replacements.items():
+                content = re.sub(
+                    wrong,
+                    correct,
+                    content,
+                    flags=re.IGNORECASE
+                )
+
+            normalized_chunks.append(f"""
+            SOURCE_TOPIC: {chunk['topic']}
+            SOURCE_TAGS: {", ".join(chunk.get("tags", []))}
+
+            CONTENT:
+            {content}
+            """.strip())
+
+        context = "\n\n".join(normalized_chunks)
+
+        response_intent = detect_response_intent(query)
+        response_pattern = RESPONSE_PATTERNS.get(
+            response_intent,
+            ""
+        )
 
         prompt = build_prompt_with_step(
             query=query,
             context=context,
-            step=step
+            step=step,
+            response_pattern=response_pattern,
+            failure_summary=failure_summary
         )
 
         response = generate_response(prompt)
