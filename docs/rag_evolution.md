@@ -2,9 +2,39 @@
 
 Tracks how the RAG pipeline evolved — what each approach did, what broke, and why we moved on.
 
+**Current pipeline (as of Approach 10):**
+```
+User Query → Retrieval → Ranking → Chunk Selection → Prompt Assembly → LLM Generation → Response Sanitization
+```
+
+**Next evolution:**
+```
+User Query → Retrieval → Ranking → Chunk Selection → Context Compression → Prompt Assembly → LLM Generation → Response Sanitization
+```
+
+Context compression sits between chunk selection and prompt assembly. This is still RAG — specifically, it is the next layer in a mature RAG pipeline called **structured retrieval orchestration**.
+
+**Why context compression is needed:** Retrieval is correct, but raw chunks still contain ~80% noise (webhook details, socket events, DB internals, rollback mechanics). The LLM sees this noise and leaks internals, hallucinating causal chains and mixing stages. Currently compensated by prompt rules and sanitizers — that works temporarily but scales badly. Context compression distills raw chunks into clean, query-relevant summaries before the answer LLM sees them.
+
+**Example of what compression does:**
+
+Raw chunk:
+> Socket event payment-status-update is emitted during DB transaction. If auto-completion later fails, transaction status becomes CANCELLED. Webhook payment.created is not sent. API returns HTTP 400.
+
+Distilled chunk:
+> Auto-completion failed after processing started, resulting in transaction cancellation.
+
+Lower entropy, less implementation noise, clearer lifecycle signal, less hallucination opportunity.
+
+**Maturity progression:**
+- ~~Naive vector search~~ (Approach 2)
+- ~~Basic semantic retrieval~~ (Approach 5)
+- ~~Simple chunk stuffing~~ (Approach 8)
+- **Current: Structured retrieval orchestration** — context shaping, lifecycle grounding, reasoning control, compression, reranking
+
 ---
 
-## Approach 10: Stage complete — response normalization layer 
+## Approach 10: Stage complete — response normalization layer
 
 **What:** Iterated on response normalization (contradiction suppression, lifecycle phrasing, defensive output cleaning) until the remaining issues were surface-form imperfections, not architectural problems. Closed this stage.
 
