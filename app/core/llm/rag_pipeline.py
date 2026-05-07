@@ -4,6 +4,7 @@ from app.core.llm.prompt import build_prompt, build_prompt_with_step
 from app.core.llm.llm import generate_response
 from app.utils.constants import RESPONSE_PATTERNS, CONTRADICTION_PATTERNS, CLEANUP_PATTERNS, INTERNAL_PATTERNS
 from app.utils.logger import logger
+from app.core.llm.lifecycle_facts import LifecycleFacts
 import numpy as np
 import re
 
@@ -150,12 +151,7 @@ def build_failure_summary(filtered_chunks):
     - cancellation
     """
 
-    summary = {
-        "intent_created": False,
-        "processing_started": False,
-        "processing_failed": False,
-        "transaction_cancelled": False,
-    }
+    summary = LifecycleFacts()
 
     combined_text = " ".join([
         chunk["content"].lower()
@@ -168,7 +164,7 @@ def build_failure_summary(filtered_chunks):
         "payment intent created",
         "platform transaction created",
     ]):
-        summary["intent_created"] = True
+        summary.intent_created = True
 
     # processing indicators
     if any(phrase in combined_text for phrase in [
@@ -177,7 +173,7 @@ def build_failure_summary(filtered_chunks):
         "settlement",
         "completion stage",
     ]):
-        summary["processing_started"] = True
+        summary.processing_started = True
 
     # failure indicators
     if any(phrase in combined_text for phrase in [
@@ -186,7 +182,7 @@ def build_failure_summary(filtered_chunks):
         "http 400",
         "rollback",
     ]):
-        summary["processing_failed"] = True
+        summary.processing_failed = True
 
     # cancellation indicators
     if any(phrase in combined_text for phrase in [
@@ -194,7 +190,7 @@ def build_failure_summary(filtered_chunks):
         "cancellation",
         "status to cancelled",
     ]):
-        summary["transaction_cancelled"] = True
+        summary.transaction_cancelled = True
 
     return summary
 

@@ -188,10 +188,10 @@ def build_prompt_with_step(
     - final cancellation state
 
     FACT SUMMARY:
-    - Intent creation confirmed: {failure_summary["intent_created"]}
-    - Processing started: {failure_summary["processing_started"]}
-    - Processing failure detected: {failure_summary["processing_failed"]}
-    - Transaction cancelled: {failure_summary["transaction_cancelled"]}
+    - Intent creation confirmed: {failure_summary.intent_created}
+    - Processing started: {failure_summary.processing_started}
+    - Processing failure detected: {failure_summary.processing_failed}
+    - Transaction cancelled: {failure_summary.transaction_cancelled}
 
     - An HTTP 400 response does NOT necessarily mean intent creation failed.
     - HTTP 400 may occur after processing has already started.
