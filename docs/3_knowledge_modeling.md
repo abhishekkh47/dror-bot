@@ -10,103 +10,74 @@ This phase pauses all retrieval logic, prompt, eval, and sanitizer work. The fou
 
 ---
 
-## Step 4.2: Chunk metadata migration
+## Step 4.3: Structured retrieval filtering engine + retrieval pipeline extraction
 
-**Category:** Knowledge Base Normalization
+**Category:** Metadata-Driven Retrieval Architecture
 
-**What:** Migrate existing chunks from loosely-tagged embeddings (`topic` + `tags`) to structured `RAGChunk` objects using the canonical `ChunkMetadata` schema defined in Step 4.1. This is where the system transitions from topic-string-driven retrieval to metadata-semantics-driven retrieval.
+**What:** Replaced all legacy topic-string-based retrieval filtering with structured metadata-driven filtering. Extracted retrieval orchestration out of `rag_pipeline.py` into a dedicated retrieval layer. This is where retrieval stops depending on topic naming conventions and starts depending on structured operational semantics.
 
-**The problem with the current structure:**
+**The problem — internal architectural inconsistency:**
 
-Chunks currently look like:
-```json
-{
-  "topic": "platform_transaction_update_mechanism",
-  "tags": ["socket", "webhook", "polling"]
-}
-```
+After Steps 4.1 and 4.2, the system had structured metadata on chunks but the actual retrieval engine was still behaving like legacy topic-string retrieval. Code like `chunk_topic.startswith(domain)` or `if domain in topic` was still the filtering mechanism. That is fragile and fundamentally non-scalable — naming drift breaks retrieval, taxonomy changes break retrieval, and lifecycle filtering remains implicit. This mismatch is exactly what caused the earlier "No relevant context found" failures.
 
-This mixes lifecycle semantics, transport semantics, and operational semantics into one retrieval surface. That is structurally wrong. Retrieval filtering cannot be precise, transport chunks leak into operational queries, and lifecycle-stage retrieval depends on topic naming conventions instead of explicit metadata fields.
+**What was built — three new files, one major refactor:**
 
-**What we are building:**
+1. **`app/core/rag/retrieval_metadata.py`** — Metadata access abstraction layer. Helper functions (`get_capability()`, `get_lifecycle_stage()`, `get_knowledge_type()`, `get_visibility()`, etc.) that create a metadata abstraction boundary. Production systems never scatter `chunk["metadata"]["capability"]` everywhere — that creates schema coupling, migration pain, and retrieval fragility. This seems small but enables future schema evolution without touching retrieval logic.
 
-A canonical chunk schema (`app/core/rag/chunk_schema.py`, already created in Step 4.1) that ALL chunks must follow:
+2. **`app/core/rag/retrieval_filtering.py`** — Canonical retrieval semantics layer. `apply_structured_filters()` replaces ALL legacy topic-prefix filtering with:
+   - **Visibility enforcement:** `internal_only` chunks never pass through
+   - **Hard capability filtering:** `capability not in step_domains` → excluded. `capability` is now the primary retrieval scope, not topic names
+   - **Lifecycle-aware boosting:** chunks whose `lifecycle_stage` matches `step.rag_topic` get a +0.35 score boost
+   - **Transport suppression:** `transport_behavior` knowledge type gets a -0.25 penalty
+   - **Retrieval observability:** debug output now prints `adjusted_score | capability | stage | type` — debugging reflects retrieval semantics instead of raw topic strings
 
-```python
-class RAGChunk(BaseModel):
-    id: str
-    metadata: ChunkMetadata  # structured retrieval semantics
-    tags: List[str] = []     # lightweight ranking hints
-    content: str
-```
+3. **`app/core/rag/retrieval_pipeline.py`** — Retrieval orchestration layer. `build_retrieval_context()` centralizes the entire retrieval grounding pipeline that was previously scattered inside `ask_with_context()`:
+   - Vector retrieval → structured filtering → noise suppression → fallback → LLM chunk selection → lifecycle extraction → distillation → operational evidence
+   - Returns a structured result: `filtered_chunks`, `distilled_chunks`, `lifecycle_facts`, `operational_evidence`
 
-Key design principle: `metadata` is separated from `tags`. Metadata = structured retrieval semantics. Tags = lightweight ranking hints. The current system incorrectly mixes them.
+4. **`app/core/llm/rag_pipeline.py`** — Refactored to delegate retrieval orchestration. The massive retrieval block inside `ask_with_context()` was replaced with a single call to `build_retrieval_context(query, step)`. `rag_pipeline.py` becomes orchestration-only: retrieve → build context → build prompt → generate → sanitize.
 
-**Migration approach — inference script (`scripts/migrate_chunks.py`):**
+**Key architectural shifts:**
 
-A deterministic migration script that transforms legacy chunks into canonical `RAGChunk` objects. The script infers metadata from the old `topic` and `tags` fields:
+| Before | After |
+|--------|-------|
+| Topic naming = retrieval logic | Metadata semantics = retrieval logic |
+| Pipeline-centric retrieval (everything in `rag_pipeline.py`) | Retrieval-layer-centric (dedicated modules) |
+| `chunk_topic.startswith(domain)` | `capability not in step_domains` |
+| Debug output shows raw topics | Debug output shows capability / stage / type |
+| 5 responsibilities in one file | Separated: filtering, metadata, orchestration, pipeline |
 
-- **Capability inference:** `"intent" in topic` → `create_intent`, `"transaction" in topic` → `platform_transaction`, `"completion" in topic` → `auto_completion`
-- **Lifecycle inference:** `"validation" in topic` → `validation`, `"completion" in topic` → `auto_completion`, `"cancel" in topic` → `cancellation`
-- **Mechanism inference:** `"webhook" in tags` → `webhook`, `"socket" in tags` → `socket`, `"polling" in tags` → `polling`
-- **Knowledge type inference:** chunks with a transport mechanism → `transport_behavior`, others → `operational_behavior`
-- **Importance inference:** chunks tagged with `failure`, `rollback`, `cancellation` → `high`
+**Important design decision — `capability` replaces `domain` as primary retrieval scope:**
 
-**Expected output format:**
-```json
-{
-  "id": "...",
-  "metadata": {
-    "business_domain": "payments",
-    "capability": "platform_transaction",
-    "lifecycle_stage": "auto_completion",
-    "knowledge_type": "operational_behavior",
-    "artifact_type": "explanation",
-    "importance": "high"
-  },
-  "tags": ["failure", "rollback"],
-  "content": "..."
-}
-```
+Previously `payment_status` was used as a domain (conflating capability and lifecycle stage). Now the system separates `capability` (workflow/API area) from `lifecycle_stage` (operational phase). This distinction was the root cause of retrieval failures in Step 3.7.
 
-**Migration rules:**
-- Do NOT overwrite old chunks. Output goes to `data/rag_chunks_v2.json`. Keep v1 and v2 side-by-side
-- This first migration is intentionally imperfect — the goal is deterministic structure first, not perfect semantics. Inference will be refined later
-- The migration script is temporary infrastructure — its job is to normalize legacy data, bootstrap canonical schema, and expose taxonomy gaps
+**Responsibility boundaries after this step:**
 
-**The architectural win:** Previously, topic naming WAS retrieval architecture. After migration, metadata semantics ARE retrieval architecture. Retrieval filtering can now use structured field matching (`chunk.capability == step.capability`) instead of string prefix matching (`topic.startswith(domain)`).
+| Layer | File | Responsibility |
+|-------|------|----------------|
+| Metadata access | `retrieval_metadata.py` | Schema abstraction |
+| Retrieval filtering | `retrieval_filtering.py` | Metadata semantics, suppression, boosting |
+| Retrieval orchestration | `retrieval_pipeline.py` | Retrieval grounding pipeline |
+| Lifecycle grounding | `lifecycle_facts.py` | Operational state extraction |
+| Operational abstraction | `operational_distiller.py` | Noise removal |
+| Explicit grounding | `operational_evidence.py` | Evidence statements |
+| Generation constraints | `prompt.py` | Prompt assembly |
+| High-level orchestration | `rag_pipeline.py` | Retrieve → prompt → generate → sanitize |
 
-**What NOT to do yet:** Do NOT rewrite retrieval logic, change embeddings, add reranking, or modify prompts. Normalized knowledge structure must exist before retrieval can evolve safely.
+**Expected effects:**
+- Cleaner retrieval, less transport leakage, more lifecycle-focused chunks
+- More stable retrieval, better eval behavior, easier debugging
+- Initial retrieval regressions expected — structured semantics now expose metadata problems that semantic similarity previously masked. That is good.
 
-**Next step:** Step 4.3 — Structured Retrieval Filtering Engine. Retrieval stops depending on topic prefixes. Filtering becomes metadata-driven. Lifecycle-stage filtering becomes explicit. Transport suppression becomes deterministic. That is where retrieval quality will jump substantially.
+**What NOT to do yet:** Reranking, graph retrieval, hybrid BM25, multi-agent orchestration. Retrieval semantics are still stabilizing.
+
+**Note on temporary import coupling:** `retrieval_pipeline.py` currently imports `is_noise_chunk` and `extract_lifecycle_facts` from `rag_pipeline.py`. This is temporarily ugly but acceptable — these will be extracted into dedicated modules later. Do NOT over-refactor immediately.
+
+**Next step:** Step 4.4 — Lifecycle-Aware Retrieval Scoring. Lifecycle stages get weighted more intelligently, operational states influence ranking, cancellation/failure chronology becomes retrieval-aware. Retrieval starts behaving like **operational reasoning retrieval** instead of semantic document search.
 
 ---
 
-## Step 4.1: Canonical knowledge taxonomy
-
-**Category:** Knowledge Modeling & Retrieval Semantics
-
-**What:** Defined the canonical retrieval taxonomy (`docs/rag_taxonomy.md`) and the canonical chunk metadata schema (`app/core/rag/chunk_schema.py`). This replaces the semi-random topic naming conventions with explicit, structured retrieval semantics. Every chunk now explicitly declares what capability it belongs to, what lifecycle stage it belongs to, what kind of knowledge it is, whether it is operational vs transport detail, and whether it should participate in normal retrieval.
-
-**Why this step exists — the taxonomy problem:**
-
-The current system retrieves based on topic names like:
-- `create_intent_auto_completion_stage`
-- `platform_transaction_update_mechanism`
-- `socket_payment_failed_payload`
-
-These are inconsistent abstraction levels, mixed semantics, mixed mechanisms, mixed lifecycle scopes. The system mixes business domains, lifecycle stages, delivery channels, event payload docs, and implementation details into overlapping metadata. `topic` is overloaded, `tags` are uncontrolled, `type` mixes document category and lifecycle meaning, and domains are underspecified.
-
-**The canonical taxonomy — 9 explicit retrieval dimensions:**
-
-| Field | Semantic question it answers | Examples |
-|-------|------------------------------|----------|
-| `business_domain` | What product/business area? | payments, refunds, disputes, wallets |
-| `capability` | What workflow/API capability? | create_intent, payment_status, auto_completion |
-| `lifecycle_stage` | What operational phase? | validation, transaction_creation, auto_completion, cancellation |
-| `operational_state` | What state does this represent? | pending, completed, failed, cancelled |
-| `knowledge_type` | What is the semantic role? | api_spec, operational_behavior, business_rule, transport_behavior |
-| `artifact_type` | What is the structural format? | flow, payload, schema, rules, explanation |
+low, payload, schema, rules, explanation |
 | `mechanism` | What transport mechanism? | webhook, socket, polling, http |
 | `visibility` | Who should see this? | public_integrator, internal_only |
 | `importance` | How should retrieval weight this? | low, medium, high, critical |

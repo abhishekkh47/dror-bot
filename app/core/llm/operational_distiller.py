@@ -6,6 +6,8 @@ def clean_operational_text(text: str) -> str:
     """
     Remove implementation-heavy operational noise
     while preserving lifecycle meaning.
+    
+    Responsibility: operational distillation/abstraction
     """
 
     lines = text.splitlines()

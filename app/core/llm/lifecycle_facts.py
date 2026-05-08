@@ -11,6 +11,8 @@ class LifecycleFacts:
     IMPORTANT: 
     This model represents BUSINESS/OPERATIONAL state,
     not implementation internals.
+
+    Responsibility: lifecycle grounding
     """
 
     # Intent/Transaction creation phase

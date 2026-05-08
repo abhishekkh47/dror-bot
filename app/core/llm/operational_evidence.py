@@ -10,6 +10,8 @@ def build_operational_evidence(
 
     These statements become the primary grounding
     layer for generation.
+
+    Responsibility: grounded truth construction / explicit grounding
     """
 
     evidence = []

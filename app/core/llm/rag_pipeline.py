@@ -4,6 +4,7 @@ from app.core.llm.operational_evidence import build_operational_evidence
 from app.core.llm.retriever import retrieve_context, store
 from app.core.llm.prompt import build_prompt, build_prompt_with_step
 from app.core.llm.llm import generate_response
+from app.core.rag.retrieval_pipeline import build_retrieval_context
 from app.utils.patterns import RESPONSE_PATTERNS, CONTRADICTION_PATTERNS, CLEANUP_PATTERNS, INTERNAL_PATTERNS
 from app.utils.logger import logger
 from app.core.llm.lifecycle_facts import LifecycleFacts
@@ -283,41 +284,22 @@ def ask_with_context(query: str, step):
     5. Build context
     6. Build prompt
     7. Generate response
+
+    Responsibility: high-level orchestration
     """
 
     try:
         print("\nSTEP DOMAIN:", step.domain)
         print("STEP RAG TOPIC:", step.rag_topic)
-        # 1. retrieve candidates
-        scored_chunks = store.search(query, step, top_k=8)
 
-        if not scored_chunks:
+        retrieval_context = build_retrieval_context(query=query, step=step)
+        if not retrieval_context:
             return "No relevant context found for this query."
-
-        # Step 1 — remove noise FIRST
-        filtered = [
-            (score, chunk)
-            for score, chunk in scored_chunks
-            if not is_noise_chunk(chunk)
-        ]
-
-        # Step 2 — fallback AFTER noise filtering
-        if not filtered:
-            filtered = scored_chunks[:2]
-
-        filtered = select_relevant_chunks(query, filtered)
         
-        if not filtered:
-            filtered = scored_chunks[:2]
-
-        # failure_summary = build_failure_summary(filtered)
-        lifecycle_facts = extract_lifecycle_facts(filtered)
-
-        distilled_chunks = distill_chunks(filtered)
-
-        operational_evidence = build_operational_evidence(
-            lifecycle_facts
-        )
+        filtered = retrieval_context["filtered_chunks"]
+        distilled_chunks = retrieval_context["distilled_chunks"]
+        lifecycle_facts = retrieval_context["lifecycle_facts"]
+        operational_evidence = retrieval_context["operational_evidence"]
 
         # Step 4 — build context
         normalized_chunks = []
