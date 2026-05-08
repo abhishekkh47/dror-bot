@@ -10,6 +10,76 @@ This phase pauses all retrieval logic, prompt, eval, and sanitizer work. The fou
 
 ---
 
+## Step 4.5: Retrieval observability & diagnostics
+
+**Category:** LLMOps Retrieval Visibility
+
+**What:** Made retrieval **explainable** by introducing structured retrieval trace objects. Every filtering/scoring decision is now recorded — why a chunk was retrieved, why it was suppressed, what scores contributed to its ranking. Replaced ad-hoc `print()` debugging with inspectable infrastructure.
+
+**The problem — debugging retrieval blind:**
+
+The system can now retrieve, filter, score, and suppress. But when retrieval fails or produces unexpected results, the only debugging available was reading scattered print statements. That does not scale. The system is no longer "semantic search" — it is **retrieval policy infrastructure**, and policy decisions need visibility.
+
+**What observability answers:**
+
+| Question | Trace provides |
+|----------|---------------|
+| Why was this chunk retrieved? | lifecycle boost, knowledge type score |
+| Why was this chunk suppressed? | `exclusion_reason`: internal_visibility, capability_mismatch |
+| Why was retrieval empty? | All decisions show `included: false` with reasons |
+| Why did irrelevant chunks dominate? | `score_breakdown` reveals weak metadata |
+| Why did cancellation reasoning fail? | lifecycle_stage mismatch visible in trace |
+
+**What was built — three components:**
+
+1. **`app/core/rag/retrieval_trace.py`** — Structured trace models:
+   - `RetrievalDecision` — per-chunk record: `chunk_id`, `capability`, `lifecycle_stage`, `knowledge_type`, `importance`, `base_score`, `adjusted_score`, `included`, `exclusion_reason`, `score_breakdown`
+   - `RetrievalTrace` — query-level record: `query`, `step_domain`, `step_topic`, list of all `decisions`
+
+2. **`app/core/rag/retrieval_filtering.py`** — Updated to collect trace alongside filtering:
+   - `apply_structured_filters()` now returns `(filtered_chunks, trace)` instead of just `filtered_chunks`
+   - Every chunk processed creates a `RetrievalDecision` with full score breakdown
+   - Excluded chunks record their `exclusion_reason` (`"internal_visibility"`, capability mismatch, etc.)
+   - Included chunks record `score_breakdown`: `{ lifecycle_score, knowledge_score, importance_score }`
+
+3. **`app/core/rag/retrieval_debugger.py`** — Diagnostic logger:
+   - `print_retrieval_trace(trace)` — prints structured trace for every chunk decision (capability, stage, type, base/adjusted scores, breakdown, exclusion reason)
+   - Currently called temporarily from `rag_pipeline.py` after retrieval — will become structured logging later
+
+**Pipeline integration:**
+- `retrieval_pipeline.py` — unpacks `(filtered, retrieval_trace)` from filtering, passes `retrieval_trace` in the return dict
+- `rag_pipeline.py` — extracts `retrieval_trace` from context, calls `print_retrieval_trace()` for temporary visibility
+
+**Updated responsibility boundaries:**
+
+| Layer | File | Responsibility |
+|-------|------|----------------|
+| Metadata access | `retrieval_metadata.py` | Schema abstraction |
+| Retrieval filtering | `retrieval_filtering.py` | Metadata semantics, suppression, boosting, trace collection |
+| Retrieval tracing | `retrieval_trace.py` | Structured decision records |
+| Retrieval debugging | `retrieval_debugger.py` | Diagnostic output |
+| Retrieval orchestration | `retrieval_pipeline.py` | Retrieval grounding pipeline |
+| Noise suppression | `retrieval_rules.py` | Noise chunk rules |
+| Lifecycle extraction | `lifecycle_extractor.py` | Deterministic lifecycle grounding |
+| Lifecycle state | `lifecycle_facts.py` | Normalized lifecycle model |
+| Operational abstraction | `operational_distiller.py` | Infra-noise reduction |
+| Explicit grounding | `operational_evidence.py` | Evidence statements |
+| Generation constraints | `prompt.py` | Prompt governance |
+| High-level orchestration | `rag_pipeline.py` | Retrieve → prompt → generate → sanitize |
+
+**Key architectural transition:** Retrieval is now **inspectable infrastructure** instead of "whatever vector search returned." This is foundational for eval debugging, ranking tuning, taxonomy tuning, failure analysis, and lifecycle retrieval debugging. Without observability, all tuning is blind.
+
+**Important — structured diagnostics, not logging spam:** The trace captures policy decisions (inclusion/exclusion + reasons + score breakdowns), not raw data dumps. That distinction is what separates production observability from prototype print statements.
+
+**What this step did NOT change:**
+- No retrieval logic changes, no scoring changes, no prompt changes
+- Debug output is temporary (print-based) — will evolve into structured logging
+- Trace is collected but not yet persisted or exposed via API
+
+**Next step:** Step 4.6 — Lifecycle-Aware Chunk Selection. The LLM chunk selector is currently still a semantic relevance selector. It must become an **operational chronology selector** — the next major retrieval evolution.
+
+---
+
 ## Step 4.4: Lifecycle-aware retrieval scoring
 
 **Category:** Operational Retrieval Intelligence

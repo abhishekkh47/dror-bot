@@ -5,6 +5,7 @@ from app.core.rag.retrieval_metadata import (
     get_knowledge_type,
     get_visibility,
 )
+from app.core.rag.retrieval_trace import RetrievalDecision, RetrievalTrace
 
 
 def apply_structured_filters(
@@ -17,11 +18,15 @@ def apply_structured_filters(
 
     Responsibility: metadata semantics
     """
+    trace = RetrievalTrace(
+        query="",
+        step_domain=step.domain or [],
+        step_topic=step.rag_topic,
+        decisions=[],
+    )
 
     step_domains = step.domain or []
-
     step_topic = step.rag_topic
-
     filtered_chunks = []
 
     for score, chunk in retrieved_chunks:
@@ -31,8 +36,23 @@ def apply_structured_filters(
         knowledge_type = get_knowledge_type(chunk)
         visibility = get_visibility(chunk)
 
+        decision = RetrievalDecision(
+            chunk_id=chunk["id"],
+            capability=capability,
+            lifecycle_stage=lifecycle_stage,
+            knowledge_type=knowledge_type,
+            importance=get_importance(chunk),
+            base_score=score,
+            adjusted_score=score,
+            included=True,
+            score_breakdown={}
+        )
+
         # Never expose internal chunks
         if visibility == "internal_only":
+            decision.included = False
+            decision.exclusion_reason = "internal_visibility"
+            trace.decisions.append(decision)
             continue
 
         # Hard capability filtering
@@ -59,12 +79,22 @@ def apply_structured_filters(
             + importance_score
         )
 
+        decision.score_breakdown = {
+            "lifecycle_score": lifecycle_score,
+            "knowledge_score": knowledge_score,
+            "importance_score": importance_score,
+        }
+        decision.adjusted_score = adjusted_score
+        trace.decisions.append(decision)
+
         print(
-            f"{adjusted_score:.4f} | "
-            f"capability={capability} | "
-            f"stage={lifecycle_stage} | "
-            f"type={knowledge_type}"
-        )
+        f"{adjusted_score:.4f} | "
+        f"base={score:.4f} | "
+        f"capability={capability} | "
+        f"stage={lifecycle_stage} | "
+        f"type={knowledge_type} | "
+        f"importance={get_importance(chunk)}"
+    )
         filtered_chunks.append(
             (adjusted_score, chunk)
         )
@@ -73,16 +103,7 @@ def apply_structured_filters(
         key=lambda x: x[0],
         reverse=True
     )
-    
-    print(
-    f"{adjusted_score:.4f} | "
-    f"base={score:.4f} | "
-    f"capability={capability} | "
-    f"stage={lifecycle_stage} | "
-    f"type={knowledge_type} | "
-    f"importance={get_importance(chunk)}"
-)
-    return filtered_chunks
+    return filtered_chunks, trace
 
 def compute_lifecycle_score(
     chunk_stage,

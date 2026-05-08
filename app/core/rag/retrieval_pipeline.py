@@ -27,9 +27,11 @@ def build_retrieval_context(
         return None
 
     # Structured filtering
-    filtered = apply_structured_filters(
-        retrieved_chunks=scored_chunks,
-        step=step,
+    filtered, retrieval_trace = (
+        apply_structured_filters(
+            retrieved_chunks=scored_chunks,
+            step=step
+        )
     )
 
     # Noise suppression
@@ -74,4 +76,5 @@ def build_retrieval_context(
         "distilled_chunks": distilled_chunks,
         "lifecycle_facts": lifecycle_facts,
         "operational_evidence": operational_evidence,
+        "retrieval_trace": retrieval_trace,
     }

@@ -1,6 +1,7 @@
 from app.core.llm.retriever import retrieve_context
 from app.core.llm.prompt import build_prompt, build_prompt_with_step
 from app.core.llm.llm import generate_response
+from app.core.rag.retrieval_debugger import print_retrieval_trace
 from app.core.rag.retrieval_pipeline import build_retrieval_context
 from app.utils.patterns import RESPONSE_PATTERNS, CONTRADICTION_PATTERNS, CLEANUP_PATTERNS, INTERNAL_PATTERNS
 from app.utils.logger import logger
@@ -161,6 +162,8 @@ def ask_with_context(query: str, step):
             return "No relevant context found for this query."
         
         filtered = retrieval_context["filtered_chunks"]
+        retrieval_trace = retrieval_context["retrieval_trace"]
+        print_retrieval_trace(retrieval_trace)
         distilled_chunks = retrieval_context["distilled_chunks"]
         lifecycle_facts = retrieval_context["lifecycle_facts"]
         operational_evidence = retrieval_context["operational_evidence"]
