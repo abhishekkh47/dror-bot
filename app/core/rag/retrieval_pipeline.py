@@ -1,7 +1,8 @@
 from app.core.llm.chunk_selector import select_relevant_chunks
 from app.core.llm.operational_distiller import distill_chunks
 from app.core.llm.operational_evidence import build_operational_evidence
-from app.core.llm.rag_pipeline import is_noise_chunk, extract_lifecycle_facts
+from app.core.rag.retrieval_rules import is_noise_chunk
+from app.core.llm.lifecycle_extractor import extract_lifecycle_facts
 from app.core.rag.retrieval_filtering import apply_structured_filters
 from app.core.llm.retriever import store
 

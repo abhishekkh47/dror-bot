@@ -1,14 +1,10 @@
-from app.core.llm.chunk_selector import select_relevant_chunks
-from app.core.llm.operational_distiller import distill_chunks
-from app.core.llm.operational_evidence import build_operational_evidence
-from app.core.llm.retriever import retrieve_context, store
+from app.core.llm.retriever import retrieve_context
 from app.core.llm.prompt import build_prompt, build_prompt_with_step
 from app.core.llm.llm import generate_response
 from app.core.rag.retrieval_pipeline import build_retrieval_context
 from app.utils.patterns import RESPONSE_PATTERNS, CONTRADICTION_PATTERNS, CLEANUP_PATTERNS, INTERNAL_PATTERNS
 from app.utils.logger import logger
 from app.core.llm.lifecycle_facts import LifecycleFacts
-import numpy as np
 import re
 
 def ask(query: str):
@@ -75,11 +71,6 @@ def is_chunk_relevant(chunk, step):
     step_prefix = step_tokens[0]
     return chunk["topic"].startswith(step_prefix)
 
-def is_noise_chunk(chunk):
-    return chunk["topic"] in [
-        "create_intent_pending_event_without_completion"
-    ]
-
 def sanitize_response(resp: str):
     forbidden = ["internal vector", "embedding", "retrieval score"]
 
@@ -143,133 +134,6 @@ def detect_response_intent(query: str):
 
     return "generic_failure"
 
-def build_failure_summary(filtered_chunks):
-    """
-    Extract structured lifecycle facts from retrieved chunks.
-
-    This prevents the LLM from incorrectly mixing:
-    - intent creation
-    - processing
-    - auto-completion
-    - cancellation
-    """
-
-    summary = LifecycleFacts()
-
-    combined_text = " ".join([
-        chunk["content"].lower()
-        for _, chunk in filtered_chunks
-    ])
-
-    # creation success indicators
-    if any(phrase in combined_text for phrase in [
-        "intent created successfully",
-        "payment intent created",
-        "platform transaction created",
-    ]):
-        summary.intent_created = True
-
-    # processing indicators
-    if any(phrase in combined_text for phrase in [
-        "auto-completion",
-        "processing",
-        "settlement",
-        "completion stage",
-    ]):
-        summary.processing_started = True
-
-    # failure indicators
-    if any(phrase in combined_text for phrase in [
-        "failed",
-        "error",
-        "http 400",
-        "rollback",
-    ]):
-        summary.processing_failed = True
-
-    # cancellation indicators
-    if any(phrase in combined_text for phrase in [
-        "cancelled",
-        "cancellation",
-        "status to cancelled",
-    ]):
-        summary.transaction_cancelled = True
-
-    return summary
-
-def extract_lifecycle_facts(filtered_chunks):
-    """
-    Extract deterministic operational lifecycle facts from retrieved chunks
-
-    This layer exists to:
-    - separate lifecycle reasoning from generation
-    - reduce prompt hallucinations/ambiguity
-    - normalize operational state
-    """
-
-    facts = LifecycleFacts()
-    combined_text = " ".join([
-        chunk["content"].lower()
-        for _, chunk in filtered_chunks
-    ])
-
-    # intent creation indicators
-    if any(phrase in combined_text for phrase in [
-        "intent created successfully",
-        "payment intent created",
-        "platform transaction created",
-    ]):
-        facts.intent_created = True
-
-    # processing indicators
-    if any(phrase in combined_text for phrase in [
-        "auto-completion",
-        "processing",
-        "settlement",
-        "completion stage",
-    ]):
-        facts.processing_started = True
-
-    # failure indicators
-    if any(phrase in combined_text for phrase in [
-        "failed",
-        "error",
-        "http 400",
-        "rollback",
-    ]):
-        facts.processing_failed = True
-    
-    # Auto-completion failure indicators
-    if any(phrase in combined_text for phrase in [
-        "auto-completion failed",
-        "auto-completion error",
-        "auto-completion rollback",
-    ]):
-        facts.auto_completion_failed = True
-
-    # Cancellation indicators
-    if any(phrase in combined_text for phrase in [
-        "cancelled",
-        "cancellation",
-        "status to cancelled",
-    ]):
-        facts.transaction_cancelled = True
-
-    # Completion indicators
-    if any(phrase in combined_text for phrase in [
-        "marked platform transaction as completed",
-        "payment completed successfully",
-        "transaction_completed",
-    ]):
-        facts.processing_completed = True
-
-    # Apply deterministic lifecycle normalization
-    facts.infer_derived_state()
-    facts.resolve_contradictions()
-
-    return facts
-
-    # cancellation indicators
 def ask_with_context(query: str, step):
     """
     Here we will use store.search to get the top 8 chunks and then filter them based on the step.rag_topic
