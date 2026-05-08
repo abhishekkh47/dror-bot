@@ -6,6 +6,24 @@ The system is transitioning from **advanced retrieval** to **state-grounded reas
 
 ---
 
+## Step 3.7: Evaluation framework + domain alignment discovery (current, uncommitted)
+
+**What:** Built a deterministic regression evaluation harness (`app/tests/evals/`) to detect lifecycle regressions, leakage, and contradictions automatically after any architecture change. The framework immediately exposed a deeper problem: **retrieval taxonomy mismatch** — flow domains, chunk topics, and eval domains use inconsistent naming, causing retrieval to return nothing for valid queries.
+
+**Evolution through 4 sub-steps (see `app/tests/evals/eval_evolution.md` for full details):**
+- **3.7a** — Initial eval framework: test cases with required/forbidden phrases, deterministic evaluator, pass/fail runner
+- **3.7b** — Fixed eval to test production path (`ask_with_context` instead of `ask`), added pipeline error detection
+- **3.7c** — Replaced fake `EvalStep` with real `Step` model from production — evals must use production contracts
+- **3.7d** — Evals revealed domain alignment crisis: `domain=["payment_status"]` finds nothing because chunks use `platform_transaction_*` topics. The real bottleneck is now **knowledge taxonomy**, not retrieval logic or prompts
+
+**Key discovery:** The system has evolved enough that taxonomy consistency matters more than embedding quality. Lifecycle stage is more important than semantic similarity for retrieval. Current metadata (topic, tags, type) mixes business domains, lifecycle stages, delivery channels, and implementation details into one namespace — structurally wrong for production.
+
+**What needs to happen before any more architecture work:** Canonical metadata schema redesign. Chunks need explicit `business_domain`, `capability`, `lifecycle_stage`, `knowledge_type`, `mechanism`, `visibility` fields instead of overloaded `topic` strings. Retrieval filtering should use structured field matching, not `topic.startswith(domain)`.
+
+**Result:** Evals matter more than prompts at this stage. The eval framework is already working — it revealed the taxonomy mismatch that would have been invisible without automated testing. The system is no longer building "vector search over docs" — it's building operational knowledge infrastructure, and the knowledge model is now the weakest layer.
+
+---
+
 ## Step 3.6: Minimal controlled generation — evidence-driven prompts
 
 **What:** Refactored the giant monolithic prompt into structured, separated sections (`SYSTEM_RULES`, `LIFECYCLE_RULES`, `RESPONSE_RULES`, `PROMPT_TEMPLATE`). Removed duplicated lifecycle reasoning rules that are now enforced structurally by `LifecycleFacts`, contradiction resolution, and operational evidence. The prompt's role shifted from validator/reasoner/suppressor to **evidence interpreter**.

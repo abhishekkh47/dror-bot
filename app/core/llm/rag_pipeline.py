@@ -286,6 +286,8 @@ def ask_with_context(query: str, step):
     """
 
     try:
+        print("\nSTEP DOMAIN:", step.domain)
+        print("STEP RAG TOPIC:", step.rag_topic)
         # 1. retrieve candidates
         scored_chunks = store.search(query, step, top_k=8)
 
