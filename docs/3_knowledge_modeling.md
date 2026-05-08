@@ -10,6 +10,60 @@ This phase pauses all retrieval logic, prompt, eval, and sanitizer work. The fou
 
 ---
 
+## Step 4.4: Lifecycle-aware retrieval scoring
+
+**Category:** Operational Retrieval Intelligence
+
+**What:** Evolved the retrieval filtering layer from hard filtering + lightweight boosts into an intelligent, multi-signal operational scoring engine. Retrieval ranking itself now understands lifecycle stages, knowledge types, and importance — not just embedding similarity. This is the transition from **semantic similarity search** to **operationally-prioritized retrieval**.
+
+**The problem — retrieval scoring is too shallow:**
+
+After Step 4.3, retrieval filtering was structured and metadata-driven, but scoring was still primitive: a single +0.35 boost for exact lifecycle stage match and a -0.25 penalty for transport chunks. That meant a chunk could still rank highly because wording is similar or embeddings are close, even if the lifecycle stage is wrong, the operational state is irrelevant, or the mechanism dominates. Example: "why was payment cancelled?" could retrieve webhook cancellation payload docs, socket events, and rollback schemas (semantically similar because "cancelled" appears frequently) instead of the operationally needed cancellation cause, processing failure chronology, and auto-completion semantics.
+
+**Core principle for this system:** Lifecycle relevance matters more than semantic similarity.
+
+**What was built — three scoring functions added to `retrieval_filtering.py`:**
+
+1. **`compute_lifecycle_score(chunk_stage, step_topic)`** — Chronology-aware lifecycle scoring:
+   - Exact stage match → +0.45
+   - Related stage match → +0.20 (e.g., `auto_completion` step also boosts `completion`, `cancellation`, `settlement` chunks)
+   - Related stage mappings defined per capability (`auto_completion`, `payment_status`, `platform_transaction`)
+   - No match → 0
+
+2. **`compute_knowledge_type_score(knowledge_type)`** — Operational usefulness scoring:
+   - `operational_behavior` → +0.30
+   - `troubleshooting` → +0.25
+   - `business_rule` → +0.20
+   - `integration_guidance` → +0.15
+   - `transport_behavior` → -0.35
+   - `payload_schema` → -0.40
+   - This formalizes: operational chunks > transport chunks (previously only weakly suppressed)
+
+3. **`compute_importance_score(importance)`** — Metadata-driven priority weighting:
+   - `critical` → +0.30, `high` → +0.20, `medium` → +0.10, `low` → 0
+
+**Updated `apply_structured_filters()` — composite scoring:**
+
+The previous simplistic boost was replaced with a composite score:
+```
+adjusted_score = base_similarity + lifecycle_score + knowledge_score + importance_score
+```
+
+Debug output now shows the full scoring breakdown: `adjusted_score | base | capability | stage | type | importance` — meaningful retrieval observability instead of opaque final scores.
+
+**The architectural transition:** The system is evolving from vector similarity retrieval to a **retrieval policy engine**. Retrieval ranking is no longer just "which embedding is closest" — it is "which chunk is most operationally relevant given the current lifecycle context."
+
+**Expected effects (without touching prompts):**
+- Better cancellation reasoning, less transport leakage
+- More operational chunks selected, more stable lifecycle retrieval
+- Cleaner evidence generation, better eval performance
+
+**Important — do NOT over-tune scores yet:** The exact numbers (0.20, 0.30, -0.35) are not sacred. The goal right now is retrieval semantics infrastructure, not perfect ranking. Tuning comes later using evals.
+
+**Next step:** Step 4.5 — Retrieval Observability & Diagnostics. Log retrieval decisions, explain why chunks ranked, trace suppression, debug lifecycle mismatches, inspect retrieval failures systematically. That is where real production LLMOps visibility starts.
+
+---
+
 ## Step 4.3: Structured retrieval filtering engine + retrieval pipeline extraction
 
 **Category:** Metadata-Driven Retrieval Architecture
