@@ -4,9 +4,11 @@ Continues from `rag_evolution.md` (Phases 1-2: Retrieval Stability + Lifecycle G
 
 The system is transitioning from **advanced retrieval** to **state-grounded reasoning engine**. This phase moves reasoning BEFORE generation instead of INSIDE generation.
 
+**Phase 3 is now complete.** Step 3.7 (Evaluation Framework) revealed that the bottleneck is no longer retrieval logic, prompts, or generation — it is **knowledge taxonomy**. Flow domains, chunk topics, and retrieval domains are inconsistently named, causing hard domain filtering to break silently. The next phase (Phase 4 — Knowledge Modeling & Retrieval Semantics) is documented in `3_knowledge_modeling.md`.
+
 ---
 
-## Step 3.7: Evaluation framework + domain alignment discovery (current, uncommitted)
+## Step 3.7: Evaluation framework + domain alignment discovery
 
 **What:** Built a deterministic regression evaluation harness (`app/tests/evals/`) to detect lifecycle regressions, leakage, and contradictions automatically after any architecture change. The framework immediately exposed a deeper problem: **retrieval taxonomy mismatch** — flow domains, chunk topics, and eval domains use inconsistent naming, causing retrieval to return nothing for valid queries.
 
