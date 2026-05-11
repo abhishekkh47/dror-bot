@@ -1,6 +1,7 @@
 from app.core.llm.retriever import retrieve_context
 from app.core.llm.prompt import build_prompt, build_prompt_with_step
 from app.core.llm.llm import generate_response
+from app.core.rag.context_builder import build_structured_context
 from app.core.rag.retrieval_debugger import print_retrieval_trace
 from app.core.rag.retrieval_metadata import get_capability, get_lifecycle_stage
 from app.core.rag.retrieval_pipeline import build_retrieval_context
@@ -92,20 +93,18 @@ def detect_response_intent(query: str):
 
 def ask_with_context(query: str, step):
     """
-    Here we will use store.search to get the top 8 chunks and then filter them based on the step.rag_topic
-    This is similar to retrieve data from cache
-    recompute embedding -> slow, redundant
-    reuse stored vectors -> fast, clean
-    We will use a 3-layer filter to get the most relevant chunks
-    1. topic partial match
-    2. Tag overlap
-    3. Soft fallback
-    4. Similarity threshold
-    5. Build context
-    6. Build prompt
-    7. Generate response
+    High-level RAG orchestration layer.
 
-    Responsibility: high-level orchestration
+    Pipeline:
+    1. Retrieval orchestration
+    2. Structured filtering
+    3. Lifecycle-aware selection
+    4. Retrieval validation
+    5. Operational distillation
+    6. Structured context assembly
+    7. Prompt generation
+    8. LLM response generation
+    9. Response sanitization
     """
 
     try:
@@ -114,77 +113,24 @@ def ask_with_context(query: str, step):
 
         retrieval_context = build_retrieval_context(query=query, step=step)
         diagnostic = retrieval_context.get("diagnostic")
+        # TEMP DEVELOPMENT RESPONSE
         if diagnostic and diagnostic.failed_stage:
             return (
                 f"No relevant context found. "
                 f"Failed at: {diagnostic.failed_stage}"
             )
         
-        filtered = retrieval_context["selected_chunks"]
         retrieval_trace = retrieval_context["retrieval_trace"]
+        # TEMP DEBUGGING ONLY
         print_retrieval_trace(retrieval_trace)
         distilled_chunks = retrieval_context["distilled_chunks"]
         lifecycle_facts = retrieval_context["lifecycle_facts"]
         operational_evidence = retrieval_context["operational_evidence"]
 
-        # Step 4 — build context
-        normalized_chunks = []
-        for chunk in distilled_chunks:
-            content = chunk["content"]
-
-            replacements = {
-                "payment intent creation failed":
-                    "payment processing failed after intent creation",
-
-                "intent creation failed":
-                    "processing failed after intent creation",
-
-                "payment intent creation failed after processing":
-                    "payment processing failed after intent creation",
-
-                "intent was not created successfully":
-                    "payment processing did not complete successfully",
-
-                "payment intent was not created successfully":
-                    "payment processing did not complete successfully",
-
-                "transaction creation failed":
-                    "transaction processing failed",
-            }
-
-            for wrong, correct in replacements.items():
-                content = re.sub(
-                    wrong,
-                    correct,
-                    content,
-                    flags=re.IGNORECASE
-                )
-
-            capability = get_capability(chunk)
-            lifecycle_stage = get_lifecycle_stage(chunk)
-
-            normalized_chunks.append(f"""
-            SOURCE_CAPABILITY: {capability}
-            SOURCE_STAGE: {lifecycle_stage}
-            SOURCE_TAGS: {", ".join(chunk.get("tags", []))}
-            CONTENT:
-            {content}
-            """.strip())
-
-        evidence_block = "\n".join([
-            f"- {item}"
-            for item in operational_evidence
-        ])
-
-        raw_context = "\n\n".join(normalized_chunks)
-
-        context = f"""
-        OPERATIONAL_EVIDENCE:
-        {evidence_block}
-
-        SUPPORTING_CONTEXT:
-        {raw_context}
-        """.strip()
+        context = build_structured_context(
+            context_chunks=distilled_chunks,
+            operational_evidence=operational_evidence
+        )
 
         response_intent = detect_response_intent(query)
         response_pattern = RESPONSE_PATTERNS.get(

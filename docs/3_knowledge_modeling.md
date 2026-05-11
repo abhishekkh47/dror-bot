@@ -10,6 +10,87 @@ This phase pauses all retrieval logic, prompt, eval, and sanitizer work. The fou
 
 ---
 
+## Step 4.9: Context assembly governance
+
+**Category:** Structured Evidence Grounding
+
+**What:** Replaced semi-freeform chunk concatenation in `rag_pipeline.py` with a dedicated context builder (`app/core/rag/context_builder.py`) that structures generation context into typed evidence sections. The model no longer receives flat text blobs where it must infer importance, causality, and evidence hierarchy. It now receives **pre-structured operational evidence packaging**.
+
+**The problem — flat context concatenation:**
+
+After all the retrieval infrastructure improvements (metadata, lifecycle scoring, observability, validation), context assembly was still:
+
+```
+raw_context = "\n\n".join(normalized_chunks)
+context = f"OPERATIONAL_EVIDENCE:\n{evidence_block}\n\nSUPPORTING_CONTEXT:\n{raw_context}"
+```
+
+All retrieved evidence entered generation as equal-looking text. A critical processing failure chunk, a high-importance cancellation result, a low-value webhook retry note, and a medium polling fallback all competed equally in `SUPPORTING_CONTEXT`. The model itself had to decide what matters most — weak architecture. LLMs are much better at reasoning over structured evidence than sorting noisy evidence themselves.
+
+**What was built:**
+
+**`app/core/rag/context_builder.py`** — `build_structured_context(context_chunks, operational_evidence)`:
+- Classifies each chunk by `knowledge_type` into typed sections:
+  - `operational_behavior` / `business_rule` → `LIFECYCLE_CONTEXT`
+  - `troubleshooting` → `TROUBLESHOOTING_CONTEXT`
+  - `transport_behavior` → `TRANSPORT_CONTEXT`
+- Each chunk entry includes explicit `CAPABILITY` and `LIFECYCLE_STAGE` headers — the model sees structured metadata, not raw text
+- Assembles sections in priority order: `OPERATIONAL_EVIDENCE` → `LIFECYCLE_CONTEXT` → `TROUBLESHOOTING_CONTEXT` → `TRANSPORT_CONTEXT`
+- Empty sections are omitted entirely — no noise
+
+**Context structure the model now receives:**
+
+```
+OPERATIONAL_EVIDENCE:
+- payment intent creation succeeded
+- processing started
+- auto-completion failed
+- transaction cancelled after processing failure
+
+LIFECYCLE_CONTEXT:
+
+CAPABILITY: create_intent
+LIFECYCLE_STAGE: auto_completion
+CONTENT:
+<operational chunk text>
+
+TROUBLESHOOTING_CONTEXT:
+
+CAPABILITY: create_intent
+LIFECYCLE_STAGE: cancellation
+CONTENT:
+<troubleshooting chunk text>
+```
+
+Previously all of this was a single `SUPPORTING_CONTEXT` blob.
+
+**`rag_pipeline.py` simplified:** The entire manual context assembly block (normalized_chunks loop, regex replacements, topic/tag formatting, raw_context concatenation) was deleted. Replaced with a single call:
+
+```python
+context = build_structured_context(
+    context_chunks=distilled_chunks,
+    operational_evidence=operational_evidence
+)
+```
+
+`rag_pipeline.py` now cleanly follows its intended role — high-level orchestration only:
+1. Retrieval orchestration → 2. Diagnostic check → 3. Structured context assembly → 4. Prompt generation → 5. LLM response → 6. Sanitization
+
+**The architectural transition:** The system is moving from **retrieval-guided prompting** to **evidence-governed generation**. The retrieval layer now structures evidence before generation, instead of dumping raw chunks and hoping the prompt sorts it out.
+
+**Expected effects (without changing prompts):**
+- Better chronology consistency, less cancellation confusion
+- Cleaner operational explanations, less transport leakage
+- Less prompt overfitting pressure — the model receives pre-organized evidence
+
+**Long-term importance:** The context builder eventually becomes responsible for chronology ordering, evidence prioritization, token budgeting, contradiction suppression, and confidence-aware packaging. Most enterprise RAG systems never separate this layer cleanly — it stays buried in prompt assembly forever.
+
+**What this step did NOT change:**
+- No prompt changes, no retrieval changes, no model changes
+- Transport sections still included (just deprioritized by section ordering) — full suppression comes later
+
+---
+
 ## Step 4.8: Retrieval quality validation + lifecycle extraction ordering fix
 
 **Category:** Retrieval Evidence Validation
