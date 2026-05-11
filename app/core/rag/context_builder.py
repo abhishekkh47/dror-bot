@@ -1,6 +1,6 @@
 from app.core.rag.retrieval_metadata import get_capability, get_lifecycle_stage, get_knowledge_type
 
-def build_structured_context(context_chunks, operational_evidence):
+def build_structured_context(context_chunks, operational_evidence, lifecycle_timeline):
     """
     Build a structured generation context for the LLM 
     from retrieved chunks and operational evidence
@@ -51,11 +51,23 @@ CONTENT:
         for item in operational_evidence
     ])
 
+    timeline_block = "\n".join([
+        f"{idx + 1}. {event}"
+        for idx, event in enumerate(
+            lifecycle_timeline
+        )
+    ])
+
     sections = []
 
     sections.append(f"""
 OPERATIONAL_EVIDENCE:
 {evidence_block}
+""".strip())
+
+    sections.append(f"""
+LIFECYCLE_TIMELINE:
+{timeline_block}
 """.strip())
 
     if lifecycle_sections:

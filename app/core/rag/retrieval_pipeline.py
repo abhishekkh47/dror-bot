@@ -9,6 +9,7 @@ from app.core.llm.lifecycle_extractor import extract_lifecycle_facts
 from app.core.rag.retrieval_filtering import apply_structured_filters
 from app.core.llm.retriever import store
 from app.core.rag.retrieval_validator import validate_retrieval_quality
+from app.core.rag.timeline_builder import build_lifecycle_timeline
 
 
 def build_retrieval_context(
@@ -138,6 +139,13 @@ def build_retrieval_context(
         )
     )
 
+    # Lifecycle timeline
+    lifecycle_timeline = (
+        build_lifecycle_timeline(
+            lifecycle_facts
+        )
+    )
+
     return {
         "candidate_chunks": candidate_chunks,
         "selected_chunks": selected_chunks,
@@ -147,4 +155,5 @@ def build_retrieval_context(
         "retrieval_trace": retrieval_trace,
         "diagnostic": diagnostic,
         "retrieval_confidence": retrieval_confidence,
+        "lifecycle_timeline": lifecycle_timeline,
     }

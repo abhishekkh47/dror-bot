@@ -128,10 +128,12 @@ def ask_with_context(query: str, step):
         lifecycle_facts = retrieval_context["lifecycle_facts"]
         operational_evidence = retrieval_context["operational_evidence"]
         retrieval_confidence = retrieval_context["retrieval_confidence"]
+        lifecycle_timeline = retrieval_context["lifecycle_timeline"]
 
         context = build_structured_context(
             context_chunks=distilled_chunks,
-            operational_evidence=operational_evidence
+            operational_evidence=operational_evidence,
+            lifecycle_timeline=lifecycle_timeline
         )
 
         response_constraints = build_response_constraints(

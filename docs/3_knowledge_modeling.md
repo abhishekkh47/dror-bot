@@ -10,6 +10,73 @@ This phase pauses all retrieval logic, prompt, eval, and sanitizer work. The fou
 
 ---
 
+## Step 4.13: Lifecycle timeline reconstruction
+
+**Category:** Explicit Operational Chronology Modeling
+
+**What:** Added a deterministic timeline builder that reconstructs explicit operational event order from lifecycle facts before generation. The model no longer infers chronology from fragmented evidence chunks — it receives a numbered, ordered timeline of what happened. Chronology becomes **retrieval-governed** instead of LLM-inferred.
+
+**The problem — implicit chronology from fragments:**
+
+Lifecycle facts (`processing_started = True`, `transaction_cancelled = True`) are state indicators, not event chronology. Retrieved chunks may contain "intent created", "processing started", "auto-completion failed", "transaction cancelled" — but the temporal order is still implicit. The model must reconstruct the timeline itself, which creates chronology drift, causal hallucinations, lifecycle confusion, and inconsistent explanations, especially in edge cases.
+
+**Key principle:** LLMs are weak at reconstructing precise operational timelines from fragmented evidence. The retrieval layer should reconstruct chronology BEFORE generation.
+
+**What was built:**
+
+**`app/core/rag/timeline_builder.py`** — `build_lifecycle_timeline(lifecycle_facts)`:
+- Deterministic, ordered event construction from lifecycle facts:
+  1. `intent_created` → "Payment intent was created."
+  2. `processing_started` → "Payment processing started."
+  3. `processing_failed` → "Payment processing failed."
+  4. `transaction_cancelled` → "Transaction was cancelled."
+  5. `final_state` → "Final transaction state: {state}."
+- Intentionally NOT LLM-generated, NOT chain-of-thought, NOT inferential — deterministic only
+
+**Example timeline the model now receives:**
+```
+LIFECYCLE_TIMELINE:
+1. Payment intent was created.
+2. Payment processing started.
+3. Payment processing failed.
+4. Transaction was cancelled.
+5. Final transaction state: cancelled.
+```
+
+**Pipeline integration:**
+- `retrieval_pipeline.py` — builds timeline from `final_lifecycle_facts` after operational evidence, returns `lifecycle_timeline` in context dict
+- `rag_pipeline.py` — extracts timeline, passes to context builder
+- `context_builder.py` — accepts `lifecycle_timeline` parameter, builds numbered `LIFECYCLE_TIMELINE` section placed between `OPERATIONAL_EVIDENCE` and `LIFECYCLE_CONTEXT`
+
+**Context section ordering (what the model now sees):**
+1. `OPERATIONAL_EVIDENCE` — grounded facts
+2. `LIFECYCLE_TIMELINE` — explicit chronology
+3. `LIFECYCLE_CONTEXT` — operational/business rule chunks with evidence IDs
+4. `TROUBLESHOOTING_CONTEXT` — troubleshooting chunks
+5. `TRANSPORT_CONTEXT` — transport chunks (deprioritized)
+
+**What this changes architecturally:**
+
+| Before | After |
+|--------|-------|
+| Model infers chronology from fragmented evidence blobs | Model receives explicit operational event order |
+| Timeline reconstruction happens during generation | Timeline reconstruction happens in retrieval layer |
+| Chronology drift in edge cases | Deterministic chronology from lifecycle facts |
+
+**Expected effects (without changing prompts):**
+- Chronology reasoning stabilizes massively
+- Cancellation explanations improve heavily (clear cause → outcome ordering)
+- Causal hallucinations and lifecycle contradictions drop sharply
+- Operational explanations become more deterministic
+
+**What this step did NOT change:**
+- No retrieval changes, no scoring changes, no model changes
+- Timeline is currently derived from lifecycle facts only — not yet from chunk-level event ordering (future evolution)
+
+**Next step:** Step 4.14 — Contradiction Detection & Reasoning Consistency Checks. The system should actively detect inconsistent lifecycle reasoning, unsupported causal chains, chronology violations, and conflicting operational claims before returning the answer — moving beyond relying on prompt constraints and sanitization alone.
+
+---
+
 ## Step 4.12: Evidence attribution & claim grounding
 
 **Category:** Explicit Reasoning Grounding
