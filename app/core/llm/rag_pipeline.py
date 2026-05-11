@@ -2,6 +2,7 @@ from app.core.llm.retriever import retrieve_context
 from app.core.llm.prompt import build_prompt, build_prompt_with_step
 from app.core.llm.llm import generate_response
 from app.core.rag.context_builder import build_structured_context
+from app.core.rag.response_governance import build_response_constraints
 from app.core.rag.retrieval_debugger import print_retrieval_trace
 from app.core.rag.retrieval_metadata import get_capability, get_lifecycle_stage
 from app.core.rag.retrieval_pipeline import build_retrieval_context
@@ -126,10 +127,16 @@ def ask_with_context(query: str, step):
         distilled_chunks = retrieval_context["distilled_chunks"]
         lifecycle_facts = retrieval_context["lifecycle_facts"]
         operational_evidence = retrieval_context["operational_evidence"]
+        retrieval_confidence = retrieval_context["retrieval_confidence"]
 
         context = build_structured_context(
             context_chunks=distilled_chunks,
             operational_evidence=operational_evidence
+        )
+
+        response_constraints = build_response_constraints(
+            retrieval_confidence=retrieval_confidence,
+            lifecycle_facts=lifecycle_facts,
         )
 
         response_intent = detect_response_intent(query)
@@ -144,7 +151,8 @@ def ask_with_context(query: str, step):
             step=step,
             response_pattern=response_pattern,
             failure_summary=lifecycle_facts,
-            operational_evidence=operational_evidence
+            operational_evidence=operational_evidence,
+            response_constraints=response_constraints,
         )
 
         response = generate_response(prompt)

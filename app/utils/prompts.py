@@ -89,6 +89,11 @@ OPERATIONAL EVIDENCE
 {operational_evidence}
 
 -----------------------------------
+RESPONSE CONSTRAINTS
+-----------------------------------
+{response_constraints}
+
+-----------------------------------
 SUPPORTING CONTEXT
 -----------------------------------
 {context}

@@ -10,6 +10,62 @@ This phase pauses all retrieval logic, prompt, eval, and sanitizer work. The fou
 
 ---
 
+## Step 4.11: Response constraint governance
+
+**Category:** Controlled Operational Generation
+
+**What:** Introduced a response governance layer that injects structured operational constraints into generation based on retrieval confidence and lifecycle facts. The model no longer receives "here is evidence, generate an answer." It now receives "generate ONLY within operationally-allowed boundaries." This is **operational policy injection**, not prompt engineering.
+
+**The problem — unconstrained generation freedom:**
+
+Even with good retrieval, LLMs naturally over-generalize, over-infer, sound overconfident, and invent causal bridges. If retrieval evidence says "processing failed after intent creation," the model may still say "the payment failed because the webhook was not received" — even if webhook evidence was weak, webhook causality was not proven, and only transport chunks implied it indirectly. That is **causal hallucination**, very common in enterprise RAG. Most hallucinations are not "bad retrieval" — they are unconstrained generation behavior.
+
+**Key principle:** The model should NOT decide what operational claims are allowed. That belongs to **response governance**, not freeform generation.
+
+**What was built:**
+
+**`app/core/rag/response_governance.py`** — `build_response_constraints(retrieval_confidence, lifecycle_facts)`:
+
+Three constraint categories:
+
+1. **Base constraints** (always applied):
+   - Do not invent operational causes
+   - Do not infer unsupported webhook failures
+   - Do not assume transport-layer failures
+   - Do not mix lifecycle stages
+   - Do not describe intent creation failure after processing started
+
+2. **Confidence-aware constraints** (when `retrieval_confidence < 0.40`):
+   - Use cautious phrasing
+   - Avoid definitive root-cause claims
+   - State when evidence is incomplete
+
+3. **Lifecycle-aware constraints** (conditional on facts):
+   - If `processing_started`: "Intent creation already succeeded"
+   - If `transaction_cancelled`: "Cancellation must be treated as a downstream result"
+
+**Pipeline integration:**
+- `rag_pipeline.py` — computes constraints after retrieving confidence and lifecycle facts, passes them to prompt builder
+- `prompt.py` — `build_prompt_with_step()` now accepts `response_constraints` and injects them as a `RESPONSE_CONSTRAINTS` section **before** the context — constraints shape generation before evidence
+
+**The architectural shift:**
+
+| Before | After |
+|--------|-------|
+| retrieval → prompt → answer | retrieval → evidence validation → confidence estimation → operational policy injection → controlled generation |
+
+This also reduces prompt overfitting. Previously, reactive prompt patches like "don't say intent creation failed" and "don't mention webhooks" accumulated as ad-hoc rules. Now those become structured operational constraints — cleaner and more scalable.
+
+**Important — constraints must stay focused:** Do NOT turn constraints into 100-rule mega prompts. Constraints should remain operational, lifecycle-focused, policy-oriented, high-signal. Not giant prompt patch collections. That lesson was already learned in earlier phases.
+
+**What this step did NOT change:**
+- No retrieval changes, no embedding changes
+- Constraints are injected into prompts but generation behavior is not yet branched by confidence level (full confidence-driven behavior comes later)
+
+**Next step:** Step 4.12 — Evidence Attribution & Citation Grounding. The model still generates freeform operational explanations without explicitly grounding which evidence supported which claim, which lifecycle facts drove reasoning, and which operational chunks justified conclusions. That is the next major controllability and trustworthiness evolution.
+
+---
+
 ## Step 4.10: Retrieval confidence modeling
 
 **Category:** Evidence Confidence Governance
