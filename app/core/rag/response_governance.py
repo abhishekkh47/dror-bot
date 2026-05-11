@@ -8,6 +8,7 @@ def build_response_constraints(retrieval_confidence, lifecycle_facts):
     # Base constraints
     constraints.extend([
         "Do not invent operational causes.",
+        "Operational conclusions must align with provided evidence.",
         "Do not infer unsupported webhook failures.",
         "Do not assume transport-layer failures.",
         "Do not mix lifecycle stages.",

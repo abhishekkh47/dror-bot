@@ -93,6 +93,9 @@ RESPONSE CONSTRAINTS
 -----------------------------------
 {response_constraints}
 
+All operational conclusions must be grounded in the provided evidence context.
+Do not infer unsupported operational causes.
+
 -----------------------------------
 SUPPORTING CONTEXT
 -----------------------------------

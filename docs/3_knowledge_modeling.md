@@ -10,6 +10,62 @@ This phase pauses all retrieval logic, prompt, eval, and sanitizer work. The fou
 
 ---
 
+## Step 4.12: Evidence attribution & claim grounding
+
+**Category:** Explicit Reasoning Grounding
+
+**What:** Added stable evidence identifiers (`EV_001`, `EV_002`, ...) to every context chunk, enriched each evidence block with `KNOWLEDGE_TYPE` metadata, and added explicit grounding policy to both response constraints and the prompt template. The model no longer receives anonymous context blobs — it receives **structured evidence units** with identifiers, enabling traceable operational reasoning.
+
+**The problem — untraceable conclusions:**
+
+The system produces operational explanations, lifecycle reasoning, and cancellation analysis. But the response does not explicitly ground which evidence supported which conclusion, which lifecycle fact enabled which inference, or which operational chunk justified which claim. If the model says "the payment was cancelled because auto-completion failed," there is no way to verify whether that was directly grounded in evidence or silently inferred across gaps. That creates weak traceability, hidden hallucination risk, hard-to-debug reasoning, and poor enterprise trustworthiness.
+
+**Key principle:** The model should NOT silently bridge evidence gaps. Operational conclusions should explicitly reference supporting evidence. This is NOT customer-visible citations — it is **internal reasoning grounding**.
+
+**What was changed — three components:**
+
+1. **`app/core/rag/context_builder.py`** — Each chunk now gets an `EVIDENCE_ID` and `KNOWLEDGE_TYPE`:
+
+```
+EVIDENCE_ID: EV_001
+CAPABILITY: create_intent
+LIFECYCLE_STAGE: cancellation
+KNOWLEDGE_TYPE: operational_behavior
+CONTENT:
+Payment cancellation occurs after...
+```
+
+Previously chunks were anonymous text blocks with only `CAPABILITY`, `LIFECYCLE_STAGE`, and `CONTENT`. Now the model sees structured evidence units with stable identifiers it can reason about.
+
+2. **`app/core/rag/response_governance.py`** — Added grounding constraint:
+   - `"Operational conclusions must align with provided evidence."` added to base constraints alongside existing "Do not invent operational causes"
+
+3. **`app/utils/prompts.py`** — Added explicit grounding policy to `PROMPT_TEMPLATE`:
+   - `"All operational conclusions must be grounded in the provided evidence context."` and `"Do not infer unsupported operational causes."` placed in the `RESPONSE_CONSTRAINTS` section, before the context — grounding policy shapes generation before evidence is seen
+
+**The architectural transition:**
+
+| Before | After |
+|--------|-------|
+| Context-assisted generation (anonymous text blobs) | Evidence-governed reasoning (structured evidence units with IDs) |
+| Model silently bridges evidence gaps | Model receives grounding policy + identifiable evidence |
+| Conclusions are untraceable | Conclusions become auditable against evidence IDs |
+
+**What evidence IDs enable long-term:**
+- Hallucination debugging: trace which evidence the model used vs invented
+- Contradiction detection: verify claims against specific evidence blocks
+- Auditability: enterprise compliance requires reasoning traceability
+- Future citation: evidence IDs can eventually surface in responses if needed
+
+**What this step did NOT change:**
+- No retrieval changes, no scoring changes, no confidence changes
+- Evidence IDs are internal (not yet surfaced to users)
+- The model is not yet forced to cite evidence IDs in responses — that is a future constraint
+
+**Next step:** Step 4.13 — Lifecycle Timeline Reconstruction. Instead of the model inferring chronology from chunks, the retrieval layer explicitly reconstructs operational event order, causality chains, lifecycle transitions, and failure propagation. One of the biggest remaining reasoning-quality improvements.
+
+---
+
 ## Step 4.11: Response constraint governance
 
 **Category:** Controlled Operational Generation

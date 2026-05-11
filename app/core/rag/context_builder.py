@@ -10,7 +10,7 @@ def build_structured_context(context_chunks, operational_evidence):
     troubleshooting_sections = []
     transport_sections = []
     
-    for chunk in context_chunks:
+    for idx, chunk in enumerate(context_chunks):
         metadata = chunk.get("metadata", {})
         lifecycle_stage = get_lifecycle_stage(chunk)
         knowledge_type = get_knowledge_type(chunk)
@@ -18,10 +18,17 @@ def build_structured_context(context_chunks, operational_evidence):
         content = chunk["context"]
 
         formatted = f"""
-CAPABILITY: {get_capability(chunk)}
+EVIDENCE_ID:
+EV_{idx + 1:03d}
+
+CAPABILITY:
+{get_capability(chunk)}
 
 LIFECYCLE_STAGE:
 {lifecycle_stage}
+
+KNOWLEDGE_TYPE:
+{knowledge_type}
 
 CONTENT:
 {content}
