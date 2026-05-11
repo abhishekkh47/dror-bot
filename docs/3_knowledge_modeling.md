@@ -10,6 +10,90 @@ This phase pauses all retrieval logic, prompt, eval, and sanitizer work. The fou
 
 ---
 
+## Step 4.8: Retrieval quality validation + lifecycle extraction ordering fix
+
+**Category:** Retrieval Evidence Validation
+
+**What:** Introduced an evidence sufficiency gate that validates retrieval quality before generation. The system no longer assumes "retrieval returned chunks = enough evidence." It now enforces **evidence sufficiency contracts** — minimum chunk count, required lifecycle evidence, required operational knowledge types. Also fixed a subtle lifecycle extraction ordering bug where validation was running against stale lifecycle facts.
+
+**The problem — retrieval existence != retrieval sufficiency:**
+
+If retrieval returns 2 weak chunks with partial lifecycle evidence and fragmented operational states, the generation layer previously proceeded normally. That creates weak reasoning, vague answers, low-confidence operational explanations, and hallucinated lifecycle transitions. The pipeline validated retrieval *existence* (`if not selected_chunks`) but not retrieval *sufficiency*. Hallucinations are often not "model intelligence failures" — they are **retrieval sufficiency failures**. Fundamental enterprise RAG principle.
+
+**What was built:**
+
+**`app/core/rag/retrieval_validator.py`** — `validate_retrieval_quality(selected_chunks, lifecycle_facts)`:
+- Minimum evidence count: requires >= 2 selected chunks
+- Lifecycle evidence validation: if `lifecycle_facts.transaction_cancelled` is true, requires `"cancellation"` in chunk lifecycle stages — blocks generation when cancellation evidence was claimed but no cancellation chunk survived selection
+- Operational knowledge type validation: requires at least one chunk of type `operational_behavior`, `troubleshooting`, or `business_rule` — blocks generation when only transport/payload chunks remain
+- Returns `(is_valid, validation_reason)` — reason feeds into diagnostics
+
+**Evidence sufficiency contracts:**
+
+| Requirement | Why |
+|-------------|-----|
+| >= 2 chunks | Prevent single-source hallucination |
+| Lifecycle evidence matches lifecycle facts | Prevent disconnected reasoning |
+| Operational knowledge types present | Prevent transport-only generation |
+
+**The lifecycle extraction ordering bug:**
+
+The pipeline has two lifecycle extractions that serve different purposes:
+
+| Extraction | Input | Purpose |
+|------------|-------|---------|
+| Initial | `candidate_chunks` (broad) | Guide lifecycle-aware chunk selection |
+| Final | `selected_chunks` (refined) | Validate and ground final evidence for generation |
+
+The bug: validation was running against the **initial** lifecycle facts (extracted from broad candidates) instead of the **final** lifecycle facts (extracted from selected chunks). This meant validation could believe `transaction_cancelled = True` from the initial extraction, but the actual cancellation chunk may have been removed during selection. Validation was disconnected from final evidence.
+
+**The fix:** Moved final lifecycle extraction **before** validation:
+
+```
+candidate_chunks
+→ initial lifecycle extraction (guides selection)
+→ lifecycle chunk selection
+→ LLM selection
+→ FINAL lifecycle extraction (on selected_chunks)
+→ retrieval validation (using final facts)
+→ distillation
+→ operational evidence (using final facts)
+```
+
+**Recommended cleanup (variable naming):** Rename the two `lifecycle_facts` variables to `initial_lifecycle_facts` (for selection guidance) and `final_lifecycle_facts` (for validation + evidence) to make the semantic distinction explicit.
+
+**Pipeline integration:** Validation failure records in diagnostics as `failed_stage: "retrieval_validation"` with the specific reason (`insufficient_chunk_count`, `missing_cancellation_evidence`, `missing_operational_evidence`). Returns early with diagnostic — generation never runs on insufficient evidence.
+
+**Key architectural principle:** The generation layer should NEVER decide whether evidence is sufficient. That belongs to **retrieval governance**. Generation receives pre-validated evidence or doesn't run at all.
+
+**Expected effects:**
+- Hallucination pressure drops massively — model no longer generates on incomplete chronology
+- Cancellation reasoning improves — can't proceed without cancellation evidence
+- Retrieval quality becomes enforceable, not just observable
+
+**What this step did NOT change:**
+- No prompt changes, no embedding changes, no model changes
+- Validation rules are intentionally conservative — can be tightened later using eval data
+
+**Current pipeline state — fully observable operational retrieval orchestration:**
+
+| Stage | File | Purpose |
+|-------|------|---------|
+| Vector search | `retriever.py` | Embedding similarity retrieval |
+| Structured filtering | `retrieval_filtering.py` | Metadata-governed filtering + trace |
+| Noise suppression | `retrieval_rules.py` | Infra-noise removal |
+| Initial lifecycle extraction | `lifecycle_extractor.py` | Broad operational state (guides selection) |
+| Lifecycle chunk selection | `lifecycle_chunk_selector.py` | Chronology-coherent prioritization |
+| LLM chunk refinement | `chunk_selector.py` | Secondary semantic refinement |
+| Final lifecycle extraction | `lifecycle_extractor.py` | Final operational grounding |
+| Retrieval validation | `retrieval_validator.py` | Evidence sufficiency gate |
+| Distillation | `operational_distiller.py` | Implementation noise removal |
+| Operational evidence | `operational_evidence.py` | Explicit grounding statements |
+
+**Next step:** Step 4.9 — Context Assembly Governance. Currently prompt context assembly is still semi-freeform chunk concatenation. Context itself must become structured, lifecycle-segmented, evidence-prioritized, and chronology-aware — where generation quality jumps again without prompt overfitting.
+
+---
+
 ## Step 4.7: Retrieval failure classification & staged pipeline observability
 
 **Category:** Retrieval Infrastructure Engineering

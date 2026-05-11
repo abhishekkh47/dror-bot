@@ -7,6 +7,7 @@ from app.core.rag.retrieval_rules import is_noise_chunk
 from app.core.llm.lifecycle_extractor import extract_lifecycle_facts
 from app.core.rag.retrieval_filtering import apply_structured_filters
 from app.core.llm.retriever import store
+from app.core.rag.retrieval_validator import validate_retrieval_quality
 
 
 def build_retrieval_context(
@@ -97,6 +98,24 @@ def build_retrieval_context(
     lifecycle_facts = extract_lifecycle_facts(
         selected_chunks
     )
+    
+    is_valid, validation_reason = (
+        validate_retrieval_quality(
+            selected_chunks=selected_chunks,
+            lifecycle_facts=lifecycle_facts,
+        )
+    )
+
+    if not is_valid:
+        diagnostic.failed_stage = (
+            "retrieval_validation"
+        )
+
+        diagnostic.reason = validation_reason
+
+        return {
+            "diagnostic": diagnostic
+        }
 
     # Distillation
     distilled_chunks = distill_chunks(
