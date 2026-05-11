@@ -2,6 +2,7 @@ from app.core.llm.retriever import retrieve_context
 from app.core.llm.prompt import build_prompt, build_prompt_with_step
 from app.core.llm.llm import generate_response
 from app.core.rag.context_builder import build_structured_context
+from app.core.rag.reasoning_validator import validate_reasoning_consistency
 from app.core.rag.response_governance import build_response_constraints
 from app.core.rag.retrieval_debugger import print_retrieval_trace
 from app.core.rag.retrieval_metadata import get_capability, get_lifecycle_stage
@@ -158,6 +159,18 @@ def ask_with_context(query: str, step):
         )
 
         response = generate_response(prompt)
+        reasoning_issues = (
+            validate_reasoning_consistency(
+                response=response,
+                lifecycle_facts=lifecycle_facts,
+            )
+        )
+        if reasoning_issues:
+            logger.warning(
+                f"Reasoning consistency issues: "
+                f"{reasoning_issues}"
+            )
+
         return sanitize_response(response)
     except Exception as e:
         logger.error(f"Error asking with context: {e}")

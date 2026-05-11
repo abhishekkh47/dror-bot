@@ -10,6 +10,77 @@ This phase pauses all retrieval logic, prompt, eval, and sanitizer work. The fou
 
 ---
 
+## Step 4.14: Contradiction detection & reasoning consistency
+
+**Category:** Operational Reasoning Validation
+
+**What:** Added a post-generation reasoning validator that checks the LLM's response against lifecycle facts for chronology contradictions and causal inconsistencies. The system now treats generated reasoning as **untrusted operational output** that must be validated before returning — not trusted LLM output that only needs cosmetic cleanup.
+
+**The problem — reactive cleanup vs reasoning validation:**
+
+Even with good retrieval, evidence attribution, and explicit timelines, the model can still produce inconsistent chronology ("intent creation failed after processing started"), unsupported causal chains, and logically invalid operational conclusions. The current defense is sanitization (regex-driven wording cleanup) — but regex only catches known patterns, cannot reason semantically, and cannot validate chronology logic. "Processing never started because completion failed" is logically invalid but no regex catches it.
+
+**Key principle:** Sanitization should normalize wording. Reasoning validation is a separate subsystem. The system now has three distinct post-generation layers with different trust responsibilities.
+
+**What was built:**
+
+**`app/core/rag/reasoning_validator.py`** — `validate_reasoning_consistency(response, lifecycle_facts)`:
+
+- **Chronology invariant:** If `processing_started = True`, then intent creation must have succeeded. Detects invalid patterns in response: "intent creation failed", "payment intent failed", "transaction creation failed"
+- **Cancellation invariant:** If `transaction_cancelled = True`, cancellation must be downstream. Detects "cancelled before processing"
+- Returns a list of `issues` — empty list means reasoning is consistent
+- Intentionally deterministic — NOT another LLM, NOT self-reflection prompts, NOT recursive reasoning chains
+
+**Pipeline integration — validation before sanitization:**
+
+```python
+response = generate_response(prompt)
+
+reasoning_issues = validate_reasoning_consistency(
+    response=response,
+    lifecycle_facts=lifecycle_facts,
+)
+
+if reasoning_issues:
+    logger.warning(f"Reasoning consistency issues: {reasoning_issues}")
+
+response = sanitize_response(response)
+return response
+```
+
+Validation runs on raw generated reasoning BEFORE sanitization — important because sanitization may hide evidence of bad reasoning. Currently issues are logged as warnings (not yet blocking), building observability before enforcement.
+
+**The generation flow after this step:**
+
+```
+retrieval
+→ governed generation (constraints, evidence, timeline)
+→ reasoning validation (chronology/causal consistency check)
+→ sanitization (wording normalization)
+→ response
+```
+
+**Layered trust boundaries (emerging architecture pattern):**
+
+| Layer | Trust level |
+|-------|-------------|
+| Retrieval metadata | High |
+| Lifecycle facts | High |
+| Operational evidence | High |
+| Generated reasoning | Medium — requires validation |
+| Unsupported inference | Low |
+
+The system is starting to reflect enterprise trust boundaries — generation is no longer trusted output, it is validated output.
+
+**What this step did NOT change:**
+- No retrieval changes, no prompt changes, no context assembly changes
+- Reasoning issues are currently logged, not used to block or regenerate (enforcement comes later)
+- Validator rules are intentionally minimal — a few high-value operational invariants, not a giant rule engine
+
+**Next step:** Step 4.15 — Confidence-Aware Response Behavior. The system computes `retrieval_confidence` but generation behavior still does not adapt to it — low-confidence retrieval still produces authoritative tone, strong causal claims, and overconfident operational explanations. That is the next major trustworthiness gap.
+
+---
+
 ## Step 4.13: Lifecycle timeline reconstruction
 
 **Category:** Explicit Operational Chronology Modeling
