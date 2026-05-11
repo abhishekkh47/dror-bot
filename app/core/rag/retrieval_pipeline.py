@@ -1,6 +1,7 @@
 from app.core.llm.chunk_selector import select_relevant_chunks
 from app.core.llm.operational_distiller import distill_chunks
 from app.core.llm.operational_evidence import build_operational_evidence
+from app.core.rag.lifecycle_chunk_selector import select_lifecycle_chunks
 from app.core.rag.retrieval_rules import is_noise_chunk
 from app.core.llm.lifecycle_extractor import extract_lifecycle_facts
 from app.core.rag.retrieval_filtering import apply_structured_filters
@@ -27,7 +28,7 @@ def build_retrieval_context(
         return None
 
     # Structured filtering
-    filtered, retrieval_trace = (
+    candidate_chunks, retrieval_trace = (
         apply_structured_filters(
             retrieved_chunks=scored_chunks,
             step=step
@@ -35,33 +36,44 @@ def build_retrieval_context(
     )
 
     # Noise suppression
-    filtered = [
+    candidate_chunks = [
         (score, chunk)
-        for score, chunk in filtered
+        for score, chunk in candidate_chunks
         if not is_noise_chunk(chunk)
     ]
 
     # Fallback
-    if not filtered:
-        filtered = scored_chunks[:2]
-
-    # LLM chunk selector
-    filtered = select_relevant_chunks(
-        query,
-        filtered
-    )
-
-    if not filtered:
-        filtered = scored_chunks[:2]
+    if not candidate_chunks:
+        return None
 
     # Lifecycle extraction
     lifecycle_facts = extract_lifecycle_facts(
-        filtered
+        candidate_chunks
+    )
+
+    # Lifecycle chunk selector
+    selected_chunks = select_lifecycle_chunks(
+        filtered_chunks=candidate_chunks,
+        lifecycle_facts=lifecycle_facts,
+    )
+
+    # LLM chunk selector
+    selected_chunks = select_relevant_chunks(
+        query,
+        selected_chunks
+    )
+
+    if not selected_chunks:
+        return None
+    
+    # Final lifecycle grounding
+    lifecycle_facts = extract_lifecycle_facts(
+        selected_chunks
     )
 
     # Distillation
     distilled_chunks = distill_chunks(
-        filtered
+        selected_chunks
     )
 
     # Operational evidence
@@ -72,7 +84,7 @@ def build_retrieval_context(
     )
 
     return {
-        "filtered_chunks": filtered,
+        "filtered_chunks": candidate_chunks,
         "distilled_chunks": distilled_chunks,
         "lifecycle_facts": lifecycle_facts,
         "operational_evidence": operational_evidence,

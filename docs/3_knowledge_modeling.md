@@ -10,6 +10,74 @@ This phase pauses all retrieval logic, prompt, eval, and sanitizer work. The fou
 
 ---
 
+## Step 4.6: Lifecycle-aware chunk selection
+
+**Category:** Operational Chronology Selection
+
+**What:** Changed chunk selection from "which chunks are semantically relevant?" to "which chunks best explain the operational lifecycle?" The system now has a deterministic lifecycle-aware selection layer that runs before the LLM-based semantic selector, making operational chronology the primary selection criteria instead of embedding similarity.
+
+**The problem — selector is still semantically oriented:**
+
+Even though retrieval became lifecycle-aware (Step 4.4) and metadata became structured (Steps 4.1-4.3), the final chunk selection layer still behaved like semantic relevance compression. For "why was payment cancelled?", the semantic selector might choose webhook cancellation payloads, socket event schemas, and rollback mechanics (high embedding similarity because "cancelled" appears frequently) instead of the operationally needed processing chronology, failure cause, and cancellation outcome.
+
+**Core principle:** For this system, **chronology coherence matters more than semantic density**.
+
+**What was built — two new files:**
+
+1. **`app/core/rag/chunk_selection_policy.py`** — `compute_chunk_selection_score(chunk, lifecycle_facts)`:
+   - Knowledge type scoring: `operational_behavior` +3, `troubleshooting` +2, `transport_behavior` -3
+   - Lifecycle alignment scoring (uses extracted `lifecycle_facts` to boost contextually relevant chunks):
+     - `final_state == "cancelled"` + chunk stage is `cancellation` → +4
+     - `processing_failed` + chunk state is `failed` → +3
+     - `processing_completed` + chunk state is `completed` → +2
+   - Deterministic, no LLM, no summarization, no chain-of-thought
+
+2. **`app/core/rag/lifecycle_chunk_selector.py`** — `select_lifecycle_chunks(filtered_chunks, lifecycle_facts, top_k=5)`:
+   - Rescores each chunk: `final_score = retrieval_score + policy_score`
+   - Sorts by final score, returns top_k
+   - Explicitly does NOT use LLMs, summarize, reason recursively, or generate chains
+
+**Key architecture shift — pipeline ordering changed:**
+
+The selection flow in `retrieval_pipeline.py` was restructured. Lifecycle extraction now happens **before** chunk selection refinement:
+
+```
+vector retrieval
+→ structured filtering + trace
+→ noise suppression
+→ lifecycle extraction (first pass)
+→ lifecycle-aware chunk selection (new — primary)
+→ LLM semantic chunk selection (existing — secondary refinement)
+→ lifecycle extraction (second pass — on final selected chunks)
+→ distillation
+→ operational evidence
+```
+
+Previously lifecycle extraction happened after selection. Now it informs selection — the selector knows whether the transaction was cancelled, failed, or completed, and boosts chunks that explain that outcome.
+
+**Design decision — LLM selector becomes secondary:**
+
+The existing LLM-based `select_relevant_chunks()` was not deleted. It now runs after lifecycle-aware selection as a secondary semantic refinement pass, not the primary operational selector. This is intentional — lifecycle policy controls what gets selected, LLM selector refines within that.
+
+**Design decision — do NOT over-compress:**
+
+`top_k=5` is intentionally generous. The system still benefits from supporting operational nuance, contextual edge cases, and fallback evidence. Over-compression too early causes robotic answers, brittle reasoning, and missing edge-case handling.
+
+**Expected effects (without changing prompts):**
+- More coherent cancellation explanations, better chronology preservation
+- Fewer transport-heavy chunks in final selection
+- Cleaner operational evidence, better eval consistency
+- More stable answers across query variations
+
+**What this step did NOT change:**
+- No prompt changes, no embedding changes
+- LLM chunk selector still exists as secondary refinement
+- Score values (3, 4, -3) are not tuned yet — retrieval semantics infrastructure first, tuning via evals later
+
+**Next step:** Step 4.7 — Retrieval Failure Classification. The system begins understanding WHY retrieval failed (no capability match, lifecycle mismatch, over-filtering, metadata inconsistency, transport suppression removed all evidence) — moving toward self-diagnosing retrieval infrastructure.
+
+---
+
 ## Step 4.5: Retrieval observability & diagnostics
 
 **Category:** LLMOps Retrieval Visibility
