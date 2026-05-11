@@ -10,6 +10,71 @@ This phase pauses all retrieval logic, prompt, eval, and sanitizer work. The fou
 
 ---
 
+## Step 4.10: Retrieval confidence modeling
+
+**Category:** Evidence Confidence Governance
+
+**What:** Introduced retrieval confidence scoring — the system now estimates how strong, complete, and trustworthy the retrieved evidence is **before** generation. This is NOT AI confidence (model self-assessment). It is **retrieval evidence confidence** — a governance-layer estimation based on chunk count, lifecycle diversity, operational knowledge quality, and lifecycle fact completeness. Critical distinction.
+
+**The problem — no distinction between strong and weak retrieval:**
+
+After Step 4.8 (validation), the pipeline gates generation on evidence sufficiency. But if retrieval barely passes validation — e.g., 2 weak chunks, partial lifecycle evidence, fragmented operational states — generation proceeds exactly the same as with strong evidence, high-confidence lifecycle grounding, and complete operational chronology. The model produces high-confidence operational explanations regardless of evidence quality. That creates **overconfident hallucinations** — authoritative-sounding answers built on weak evidence. One of the biggest enterprise RAG risks.
+
+**Key principle:** LLMs should NOT decide whether they are confident. That belongs to **retrieval governance**, not generation.
+
+**What was built:**
+
+**`app/core/rag/retrieval_confidence.py`** — `compute_retrieval_confidence(selected_chunks, lifecycle_facts)`:
+
+| Signal | Score | Why |
+|--------|-------|-----|
+| >= 5 chunks | +0.30 | Strong evidence volume |
+| >= 3 chunks | +0.20 | Moderate evidence |
+| >= 2 chunks | +0.10 | Minimum evidence |
+| >= 2 lifecycle stages | +0.25 | Lifecycle diversity (chronology coverage) |
+| >= 2 operational knowledge types | +0.25 | Reasoning quality (not just one type of evidence) |
+| `processing_failed` detected | +0.10 | Failure reasoning grounding |
+| `transaction_cancelled` detected | +0.10 | Cancellation reasoning grounding |
+| Maximum | 1.0 | Capped |
+
+**Pipeline integration:**
+- `retrieval_pipeline.py` — computes confidence after final lifecycle extraction and validation, returns `retrieval_confidence` in the context dict
+- `rag_pipeline.py` — retrieves confidence score (temporarily logged, not yet exposed to users or used for behavior control)
+
+**Pipeline position (after validation, before distillation):**
+
+```
+→ final lifecycle extraction
+→ retrieval validation (sufficiency gate)
+→ retrieval confidence (quality estimation)
+→ distillation
+→ operational evidence
+```
+
+Validation answers: "Can generation proceed?" Confidence answers: "How trustworthy is the evidence?" Different layers.
+
+**Future value — confidence-driven behavior:**
+
+| Confidence | Behavior |
+|------------|----------|
+| High | Full operational reasoning |
+| Medium | Cautious explanations |
+| Low | Constrained/fallback answers |
+| Very low | Escalation / insufficient evidence response |
+
+This becomes foundational for safe enterprise AI behavior — escalation logic, fallback responses, and uncertainty handling all depend on confidence infrastructure existing first.
+
+**Important — do NOT obsess over exact weights yet:** The specific numbers (0.25, 0.30, 0.10) are not sacred. The architecture matters more than the exact scoring at this stage. Tuning comes later with eval data.
+
+**What this step did NOT change:**
+- No prompt changes, no retrieval changes, no generation behavior changes yet
+- Confidence is computed and logged but not yet used to modify generation behavior
+- Not exposed to users — premature until behavior policies are defined
+
+**Next step:** Step 4.11 — Response Constraint Governance. The model still has too much freedom in answer structure, operational assertions, chronology phrasing, and causal explanation style. That is the next major controllability layer.
+
+---
+
 ## Step 4.9: Context assembly governance
 
 **Category:** Structured Evidence Grounding

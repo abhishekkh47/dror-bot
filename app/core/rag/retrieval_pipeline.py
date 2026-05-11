@@ -2,6 +2,7 @@ from app.core.llm.chunk_selector import select_relevant_chunks
 from app.core.llm.operational_distiller import distill_chunks
 from app.core.llm.operational_evidence import build_operational_evidence
 from app.core.rag.lifecycle_chunk_selector import select_lifecycle_chunks
+from app.core.rag.retrieval_confidence import compute_retrieval_confidence
 from app.core.rag.retrieval_diagnostics import RetrievalDiagnostic, RetrievalStage
 from app.core.rag.retrieval_rules import is_noise_chunk
 from app.core.llm.lifecycle_extractor import extract_lifecycle_facts
@@ -116,6 +117,13 @@ def build_retrieval_context(
         return {
             "diagnostic": diagnostic
         }
+    
+    retrieval_confidence = (
+        compute_retrieval_confidence(
+            selected_chunks=selected_chunks,
+            lifecycle_facts=lifecycle_facts,
+        )
+    )
 
     # Distillation
     distilled_chunks = distill_chunks(
@@ -138,4 +146,5 @@ def build_retrieval_context(
         "operational_evidence": operational_evidence,
         "retrieval_trace": retrieval_trace,
         "diagnostic": diagnostic,
+        "retrieval_confidence": retrieval_confidence,
     }
