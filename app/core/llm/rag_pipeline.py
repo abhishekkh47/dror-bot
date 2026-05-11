@@ -2,10 +2,10 @@ from app.core.llm.retriever import retrieve_context
 from app.core.llm.prompt import build_prompt, build_prompt_with_step
 from app.core.llm.llm import generate_response
 from app.core.rag.retrieval_debugger import print_retrieval_trace
+from app.core.rag.retrieval_metadata import get_capability, get_lifecycle_stage
 from app.core.rag.retrieval_pipeline import build_retrieval_context
 from app.utils.patterns import RESPONSE_PATTERNS, CONTRADICTION_PATTERNS, CLEANUP_PATTERNS, INTERNAL_PATTERNS
 from app.utils.logger import logger
-from app.core.llm.lifecycle_facts import LifecycleFacts
 import re
 
 def ask(query: str):
@@ -26,51 +26,6 @@ def handle_out_of_scope(query: str, step):
     - payment status
     - success/failure handling
     """.strip()
-
-# Detect intent mismatch (deprecated)
-def is_query_related_to_step(scored_chunks, step, threshold=0.55):
-    """
-    Check if any of the top chunks relevant to this step
-    have sufficient similarity score
-    """
-
-    # Check if any top chunk belongs to this step's domain
-    for score, chunk in scored_chunks:
-        if chunk["topic"].startswith(step.rag_topic.split("_")[0]):
-            if score >= threshold:
-                return True
-
-    return False
-
-def is_query_related_to_step_v2(query: str, step, store, threshold=0.55):
-    """
-    Determine if query is relevant to current step
-    using embedding similarity against step-specific chunks
-    """
-
-    # get top candidates (already domain filtered)
-    scored_chunks = store.search(query, step=step, top_k=8)
-
-    if not scored_chunks:
-        return False
-    
-    top_score = scored_chunks[0][0]
-
-    return top_score >= threshold
-
-def is_chunk_relevant(chunk, step):
-    step_tokens = step.rag_topic.split("_")
-    chunk_tags = chunk.get("tags", [])
-
-    # tag-based relevance (primary)
-    overlap = sum(1 for t in step_tokens if t in chunk_tags)
-
-    if overlap >= 1:
-        return True
-
-    # fallback: topic prefix (secondary)
-    step_prefix = step_tokens[0]
-    return chunk["topic"].startswith(step_prefix)
 
 def sanitize_response(resp: str):
     forbidden = ["internal vector", "embedding", "retrieval score"]
@@ -158,10 +113,14 @@ def ask_with_context(query: str, step):
         print("STEP RAG TOPIC:", step.rag_topic)
 
         retrieval_context = build_retrieval_context(query=query, step=step)
-        if not retrieval_context:
-            return "No relevant context found for this query."
+        diagnostic = retrieval_context.get("diagnostic")
+        if diagnostic and diagnostic.failed_stage:
+            return (
+                f"No relevant context found. "
+                f"Failed at: {diagnostic.failed_stage}"
+            )
         
-        filtered = retrieval_context["filtered_chunks"]
+        filtered = retrieval_context["selected_chunks"]
         retrieval_trace = retrieval_context["retrieval_trace"]
         print_retrieval_trace(retrieval_trace)
         distilled_chunks = retrieval_context["distilled_chunks"]
@@ -201,10 +160,13 @@ def ask_with_context(query: str, step):
                     flags=re.IGNORECASE
                 )
 
-            normalized_chunks.append(f"""
-            SOURCE_TOPIC: {chunk['topic']}
-            SOURCE_TAGS: {", ".join(chunk.get("tags", []))}
+            capability = get_capability(chunk)
+            lifecycle_stage = get_lifecycle_stage(chunk)
 
+            normalized_chunks.append(f"""
+            SOURCE_CAPABILITY: {capability}
+            SOURCE_STAGE: {lifecycle_stage}
+            SOURCE_TAGS: {", ".join(chunk.get("tags", []))}
             CONTENT:
             {content}
             """.strip())

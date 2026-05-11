@@ -10,6 +10,80 @@ This phase pauses all retrieval logic, prompt, eval, and sanitizer work. The fou
 
 ---
 
+## Step 4.7: Retrieval failure classification & staged pipeline observability
+
+**Category:** Retrieval Infrastructure Engineering
+
+**What:** Transformed the retrieval pipeline from opaque execution (chunks in, chunks out, "No relevant context found" on failure) into **observable staged retrieval execution** where every stage tracks chunk counts, collapse points are identified automatically, and retrieval failures are classified by the stage that caused them.
+
+**The problem — silent retrieval collapse:**
+
+Before this step, every pipeline stage only returned chunks. If any stage accidentally removed everything, downstream stages silently received empty input and the user saw "No relevant context found" — with zero visibility into whether vector search failed, filtering was too aggressive, noise suppression over-pruned, lifecycle selection collapsed, or LLM refinement removed all context. Debugging was print statements + guessing. Not production-grade.
+
+**What was built:**
+
+1. **`app/core/rag/retrieval_diagnostics.py`** — Structured diagnostic models:
+   - `RetrievalDiagnostic` — tracks `failed_stage`, `reason`, and `chunk_counts` (per-stage survival counts)
+   - `RetrievalStage` — enum: `VECTOR_SEARCH`, `STRUCTURED_FILTERING`, `NOISE_SUPPRESSION`, `LIFECYCLE_SELECTION`, `LLM_SELECTION`, `DISTILLATION`
+
+2. **`app/core/rag/retrieval_pipeline.py`** — Rewritten with per-stage diagnostics:
+   - Every stage records its chunk count in `diagnostic.chunk_counts`
+   - Every stage checks for empty results and records the collapse point with a human-readable reason
+   - On failure, returns early with `{ "diagnostic": diagnostic }` — no more silent `None`
+   - On success, returns the full context plus the diagnostic
+
+**Diagnostic output example:**
+```json
+{
+  "failed_stage": "llm_selection",
+  "reason": "All chunks removed by select_relevant_chunks",
+  "chunk_counts": {
+    "vector_search": 8,
+    "structured_filtering": 5,
+    "noise_suppression": 4,
+    "lifecycle_selection": 3,
+    "llm_selection": 0
+  }
+}
+```
+
+Now you can instantly see where retrieval collapsed, which stage over-filtered, and whether the problem is metadata, scoring, or semantic refinement.
+
+**The 8-stage retrieval pipeline (now fully observable):**
+
+| Stage | Purpose | What it answers |
+|-------|---------|-----------------|
+| 1. Vector search | Embedding similarity retrieval | "What does similarity think is relevant?" |
+| 2. Structured filtering | Metadata-governed filtering (capability, lifecycle, visibility, knowledge type) | "What survives domain contracts?" |
+| 3. Noise suppression | Remove infra-noise chunks | "What survives quality filtering?" |
+| 4. Lifecycle extraction | Infer operational chronology from evidence | "What is the operational state?" |
+| 5. Lifecycle chunk selection | Prioritize chronology-coherent chunks | "What best explains the lifecycle?" |
+| 6. LLM chunk refinement | Secondary semantic refinement | "What is semantically focused?" |
+| 7. Distillation | Compress implementation noise | "What is operationally clean?" |
+| 8. Operational evidence | Generate explicit grounding statements | "What are the grounded facts?" |
+
+**Before vs after:**
+- Before: `"No relevant context found"` — opaque failure, no execution history
+- After: `"Retrieval collapsed during LLM refinement — 8 chunks entered, 5 survived filtering, 3 survived selection, 0 after LLM refinement"` — self-describing execution
+
+**Other structural improvements in this stage:**
+
+- **Circular dependency fix:** Extracted `lifecycle_extractor.py` and `retrieval_rules.py` into independent modules to break the `rag_pipeline ↔ retrieval_pipeline` circular import
+- **Retrieval stage isolation:** `build_retrieval_context()` is now a clean orchestration layer with each subsystem (filtering, selection, extraction, distillation, evidence) as isolated modules with clear boundaries
+- **`rag_pipeline.py` simplified:** High-level orchestration only — delegates retrieval to `build_retrieval_context()`, handles context assembly, prompt building, generation, and sanitization
+
+**The architectural evolution:**
+- Before this stage: semantic retrieval + prompting
+- After this stage: **staged operational retrieval infrastructure** — observable, diagnosable, traceable
+
+**What this stage did NOT change:**
+- No embedding improvements, no semantic similarity changes, no prompt tuning, no model changes
+- This was **retrieval infrastructure engineering**, not AI quality tuning
+
+**Key outcome:** Future improvements become measurable, diagnosable, and traceable instead of "try prompt changes and hope." This is one of the biggest maturity jumps the system has made — the transition from advanced RAG experimentation to diagnosable AI infrastructure.
+
+---
+
 ## Step 4.6: Lifecycle-aware chunk selection
 
 **Category:** Operational Chronology Selection

@@ -2,6 +2,7 @@ from app.core.llm.chunk_selector import select_relevant_chunks
 from app.core.llm.operational_distiller import distill_chunks
 from app.core.llm.operational_evidence import build_operational_evidence
 from app.core.rag.lifecycle_chunk_selector import select_lifecycle_chunks
+from app.core.rag.retrieval_diagnostics import RetrievalDiagnostic, RetrievalStage
 from app.core.rag.retrieval_rules import is_noise_chunk
 from app.core.llm.lifecycle_extractor import extract_lifecycle_facts
 from app.core.rag.retrieval_filtering import apply_structured_filters
@@ -17,15 +18,23 @@ def build_retrieval_context(
     Responsibility: high-level retrieval orchestration
     """
 
+    diagnostic = RetrievalDiagnostic(
+        chunk_counts={}
+    )
     # Vector retrieval
     scored_chunks = store.search(
         query,
         step,
         top_k=8
     )
+    diagnostic.chunk_counts["vector_search"] = len(scored_chunks)
 
     if not scored_chunks:
-        return None
+        diagnostic.failed_stage = RetrievalStage.VECTOR_SEARCH
+        diagnostic.reason = "Vector search returned no chunks"
+        return {
+            "diagnostic": diagnostic
+        }
 
     # Structured filtering
     candidate_chunks, retrieval_trace = (
@@ -34,6 +43,13 @@ def build_retrieval_context(
             step=step
         )
     )
+    diagnostic.chunk_counts["structured_filtering"] = len(candidate_chunks)
+    if not candidate_chunks:
+        diagnostic.failed_stage = RetrievalStage.STRUCTURED_FILTERING
+        diagnostic.reason = "All chunks removed during structured filtering"
+        return {
+            "diagnostic": diagnostic
+        }
 
     # Noise suppression
     candidate_chunks = [
@@ -41,12 +57,17 @@ def build_retrieval_context(
         for score, chunk in candidate_chunks
         if not is_noise_chunk(chunk)
     ]
+    diagnostic.chunk_counts["noise_suppression"] = len(candidate_chunks)
 
     # Fallback
     if not candidate_chunks:
-        return None
+        diagnostic.failed_stage = RetrievalStage.NOISE_SUPPRESSION
+        diagnostic.reason = "All chunks removed after noise suppression"
+        return {
+            "diagnostic": diagnostic
+        }
 
-    # Lifecycle extraction
+    # initial Lifecycle extraction
     lifecycle_facts = extract_lifecycle_facts(
         candidate_chunks
     )
@@ -56,15 +77,21 @@ def build_retrieval_context(
         filtered_chunks=candidate_chunks,
         lifecycle_facts=lifecycle_facts,
     )
+    diagnostic.chunk_counts["lifecycle_selection"] = len(selected_chunks)
 
     # LLM chunk selector
     selected_chunks = select_relevant_chunks(
         query,
         selected_chunks
     )
+    diagnostic.chunk_counts["llm_selection"] = len(selected_chunks)
 
     if not selected_chunks:
-        return None
+        diagnostic.failed_stage = RetrievalStage.LLM_SELECTION
+        diagnostic.reason = "All chunks removed by select_relevant_chunks"
+        return {
+            "diagnostic": diagnostic
+        }
     
     # Final lifecycle grounding
     lifecycle_facts = extract_lifecycle_facts(
@@ -75,6 +102,7 @@ def build_retrieval_context(
     distilled_chunks = distill_chunks(
         selected_chunks
     )
+    diagnostic.chunk_counts["distillation"] = len(distilled_chunks)
 
     # Operational evidence
     operational_evidence = (
@@ -84,9 +112,11 @@ def build_retrieval_context(
     )
 
     return {
-        "filtered_chunks": candidate_chunks,
+        "candidate_chunks": candidate_chunks,
+        "selected_chunks": selected_chunks,
         "distilled_chunks": distilled_chunks,
         "lifecycle_facts": lifecycle_facts,
         "operational_evidence": operational_evidence,
         "retrieval_trace": retrieval_trace,
+        "diagnostic": diagnostic,
     }
