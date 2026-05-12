@@ -7,6 +7,7 @@ from app.core.rag.fallback_policy import determine_response_mode
 from app.core.rag.lifecycle_drift import detect_lifecycle_drift
 from app.core.rag.reasoning_validator import validate_reasoning_consistency
 from app.core.rag.response_governance import build_response_constraints
+from app.core.rag.response_reliability import compute_response_reliability
 from app.core.rag.retrieval_debugger import print_retrieval_trace
 from app.core.rag.retrieval_metadata import get_capability, get_lifecycle_stage
 from app.core.rag.retrieval_pipeline import build_retrieval_context
@@ -143,6 +144,7 @@ def ask_with_context(query: str, step):
                 retrieval_stability_score=100,
                 lifecycle_coherence_score=0,
                 operational_conflicts=[],
+                response_reliability_score=100,
             )
         
         retrieval_trace = retrieval_context["retrieval_trace"]
@@ -196,6 +198,13 @@ def ask_with_context(query: str, step):
                 "operational_conflicts",
                 [],
             )
+        )
+
+        response_reliability_score = compute_response_reliability(
+            retrieval_confidence=retrieval_confidence,
+            lifecycle_coherence_score=lifecycle_coherence_score,
+            retrieval_stability_score=retrieval_stability_score,
+            operational_conflicts=operational_conflicts,
         )
 
         lifecycle_drift_issues = detect_lifecycle_drift(
@@ -270,6 +279,7 @@ def ask_with_context(query: str, step):
         response_mode = determine_response_mode(
             retrieval_confidence=retrieval_confidence,
             reasoning_issues=reasoning_issues,
+            response_reliability_score=response_reliability_score,
         )
 
         response = sanitize_response(response)
@@ -309,6 +319,7 @@ def ask_with_context(query: str, step):
             retrieval_stability_score=retrieval_stability_score,
             lifecycle_coherence_score=lifecycle_coherence_score,
             operational_conflicts=operational_conflicts,
+            response_reliability_score=response_reliability_score
         )
     except Exception as e:
         logger.error(f"Error asking with context: {e}")
@@ -328,4 +339,5 @@ def ask_with_context(query: str, step):
             retrieval_stability_score=100,
             lifecycle_coherence_score=0,
             operational_conflicts=[],
+            response_reliability_score=100,
         )

@@ -589,3 +589,69 @@ Drift = "does evidence form valid chronology?" Conflicts = "are operational clai
 - Conflicts feed into reasoning issues and `ExecutionResult` but don't yet trigger response downgrading or retries
 
 **Next step:** Step 4.29 — Adaptive Response Downgrading. The system still does not automatically reduce answer certainty, troubleshooting specificity, or causal confidence when evidence conflicts exist, coherence is weak, or retrieval stability is low. That becomes the next major trustworthiness frontier: response reliability adaptation.
+
+---
+
+## Step 4.29: Adaptive response downgrading
+
+**Category:** Reliability-Aware Response Governance
+
+**What:** Introduced a composite response reliability score that aggregates retrieval confidence, lifecycle coherence, retrieval stability, and operational conflicts into a single trustworthiness signal. Response mode determination now uses this reliability score as the primary gate — the system gracefully degrades response behavior when overall reasoning integrity is weak, not just when retrieval confidence is low.
+
+**The problem — confidence without integrity:**
+
+High retrieval confidence can coexist with operational conflicts, weak coherence, and unstable retrieval. Example: `confidence = 0.82` but `lifecycle_coherence = 35`, `retrieval_stability = 42`, and operational conflicts detected. That is an unreliable operational state, yet the previous confidence-only response governance would still allow detailed troubleshooting, causal claims, and failure attribution. Dangerous in enterprise support systems.
+
+**Key principle:** Enterprise AI systems should degrade gracefully under uncertainty — not merely soften wording slightly. Response certainty should depend on **total reasoning integrity**, not merely retrieval confidence.
+
+**What was built:**
+
+1. **`app/core/rag/response_reliability.py`** — `compute_response_reliability(retrieval_confidence, lifecycle_coherence_score, retrieval_stability_score, operational_conflicts)`:
+
+   Composite reliability scoring (starts at 100, penalizes each weakness):
+
+   | Signal | Max penalty | Weight rationale |
+   |--------|-------------|-----------------|
+   | Low retrieval confidence | -40 | Evidence strength is the strongest signal |
+   | Weak lifecycle coherence | -25 | Incoherent narrative undermines reasoning |
+   | Low retrieval stability | -20 | Volatile retrieval undermines consistency |
+   | Operational conflicts | -15 per conflict | Each conflict is a reasoning integrity violation |
+
+   Score range: 0 (completely unreliable) to 100 (fully reliable).
+
+2. **`app/core/rag/fallback_policy.py`** — `determine_response_mode()` upgraded with reliability governance:
+
+   ```python
+   # Reliability gates take priority
+   if response_reliability_score < 40: return "fallback"
+   if response_reliability_score < 60: return "clarification"
+   # Then existing confidence-based logic
+   if retrieval_confidence >= 0.75: return "normal"
+   if retrieval_confidence >= 0.45: return "cautious"
+   if retrieval_confidence >= 0.25: return "clarification"
+   return "fallback"
+   ```
+
+   Reliability gates run BEFORE confidence checks — a high-confidence but low-integrity state still triggers fallback/clarification.
+
+**Pipeline integration:**
+- `rag_pipeline.py` — computes `response_reliability_score` after extracting all integrity signals, passes to `determine_response_mode()`
+- `ExecutionResult` — expanded with `response_reliability_score: int = 100`
+
+**What this changes — response behavior now depends on total reasoning integrity:**
+
+| Scenario | Before | After |
+|----------|--------|-------|
+| High confidence, low coherence | Normal response | Clarification/fallback |
+| High confidence, conflicts detected | Normal response | Downgraded by conflict penalty |
+| High confidence, unstable retrieval | Normal response | Downgraded by stability penalty |
+| Low everything | Fallback (confidence-only) | Fallback (reliability-driven) |
+
+**Important — trust calibration, not maximal caution:** Do NOT over-penalize uncertainty, force fallback too aggressively, or collapse useful responses unnecessarily. The goal is optimizing trust calibration — making response certainty proportional to reasoning integrity.
+
+**What this step did NOT change:**
+- No retrieval logic changes, no prompt changes
+- Reliability weights are approximate — tuning comes from eval data
+- Response downgrading is mode-based (normal/cautious/clarification/fallback) — not yet fine-grained within modes
+
+**Next step:** Step 4.30 — Retrieval Evidence Attribution & Source Traceability. Responses still do not explicitly expose which evidence supported which claim, which lifecycle facts were grounded, which operational conclusions were inferred, and which retrieval evidence justified the response. That becomes the next major enterprise trustworthiness frontier: explainable operational reasoning.
