@@ -10,6 +10,61 @@ This phase pauses all retrieval logic, prompt, eval, and sanitizer work. The fou
 
 ---
 
+## Step 4.16: Operational escalation & fallback handling
+
+**Category:** Adaptive Uncertainty Management
+
+**What:** Introduced uncertainty-aware response modes that change the system's behavioral strategy — not just wording — based on retrieval confidence and reasoning quality. Very low-confidence situations now return safe fallback responses instead of attempting speculative operational reasoning. The system now knows **when NOT to answer**.
+
+**The problem — low confidence changes wording, not strategy:**
+
+After Step 4.15, low-confidence retrieval produced softer language ("the available evidence suggests...") but the system still attempted operational reasoning, root-cause explanation, and troubleshooting conclusions. If retrieval confidence is 0.18 with fragmented lifecycle evidence, the model might still generate "the payment may have failed during processing" — speculative operational guidance that is dangerous in payment systems. Low-confidence systems should **change strategy**, not merely change wording.
+
+**Key principle:** The safest AI system is not the one that always answers. It is the one that knows when not to answer confidently.
+
+**What was built:**
+
+**`app/core/rag/fallback_policy.py`** — `determine_response_mode(retrieval_confidence, reasoning_issues)`:
+
+| Confidence | Mode | Behavior |
+|------------|------|----------|
+| >= 0.75 | `normal` | Full operational explanation |
+| >= 0.45 | `cautious` | Cautious explanation with uncertainty language |
+| >= 0.25 | `clarification` | "Additional operational details may be required..." |
+| < 0.25 | `fallback` | "The available operational evidence is insufficient..." |
+
+Deterministic policy logic — NOT LLM self-evaluation, NOT reflective prompting.
+
+**Pipeline integration — fallback after full pipeline execution:**
+
+```
+generation
+→ reasoning validation (telemetry)
+→ response mode determination
+→ sanitization
+→ fallback/clarification override (if low confidence)
+→ response
+```
+
+Fallback handling occurs AFTER reasoning validation AND sanitization. This is intentional — the system still wants telemetry, contradiction detection, and logging even for low-confidence generations. The full pipeline runs to collect observability data, then the response mode decides what actually reaches the user.
+
+**What this changes architecturally:**
+
+| Before | After |
+|--------|-------|
+| All retrieval states produce operational explanations | Response behavior becomes uncertainty-aware |
+| Low confidence = softer wording | Low confidence = different strategy (clarification/fallback) |
+| System always attempts reasoning | System refuses to reason on insufficient evidence |
+
+**What this step did NOT change:**
+- No retrieval changes, no embedding changes
+- Fallback messages are static strings for now — conversational clarification (asking follow-up questions) comes later
+- Response mode does not yet incorporate `reasoning_issues` severity into mode determination (currently only uses confidence thresholds)
+
+**Next step:** Step 4.17 — Evaluation & Regression Infrastructure Hardening. The architecture is becoming mature, so the next gap is proving reliability systematically — benchmark suites, contradiction scoring, retrieval quality metrics, hallucination regression detection, and automated evaluation pipelines. Production systems require systematic proof, not manual spot checks.
+
+---
+
 ## Step 4.15: Confidence-aware response behavior
 
 **Category:** Adaptive Operational Response Control

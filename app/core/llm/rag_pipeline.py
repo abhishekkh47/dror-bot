@@ -3,6 +3,7 @@ from app.core.llm.prompt import build_prompt, build_prompt_with_step
 from app.core.llm.llm import generate_response
 from app.core.rag.confidence_policy import build_confidence_policy
 from app.core.rag.context_builder import build_structured_context
+from app.core.rag.fallback_policy import determine_response_mode
 from app.core.rag.reasoning_validator import validate_reasoning_consistency
 from app.core.rag.response_governance import build_response_constraints
 from app.core.rag.retrieval_debugger import print_retrieval_trace
@@ -178,8 +179,26 @@ def ask_with_context(query: str, step):
                     "retrieval_confidence": retrieval_confidence,
                 }
             )
+        
+        response_mode = determine_response_mode(
+            retrieval_confidence=retrieval_confidence,
+            reasoning_issues=reasoning_issues,
+        )
 
-        return sanitize_response(response)
+        response = sanitize_response(response)
+        if response_mode == "fallback":
+            return (
+                "The available operational evidence "
+                "is insufficient to reliably determine "
+                "the payment failure cause."
+            )
+        if response_mode == "clarification":
+            return (
+                "Additional operational details may "
+                "be required to determine the exact "
+                "payment failure reason."
+            )
+        return response
     except Exception as e:
         logger.error(f"Error asking with context: {e}")
         return f"An error occurred while processing your request: {e}. Please try again later."
