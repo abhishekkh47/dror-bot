@@ -277,3 +277,88 @@ Observability, retry policies, retry metrics, retry boundaries, and retry safety
 - Recovery strategy is a static policy — not yet dynamically tuned per query
 
 **Next step:** Step 4.23 — Controlled Retrieval Retry Execution. The system actually performs bounded retries: adaptive top-k expansion, similarity threshold relaxation, adjacent lifecycle recovery, evidence augmentation. The first true adaptive retrieval execution layer.
+
+---
+
+## Step 4.23–4.24: Controlled retrieval retry execution + retry effectiveness telemetry
+
+**Category:** Self-Correcting Retrieval Infrastructure + Adaptive Retrieval Observability
+
+Two tightly coupled steps implemented together: the system now executes bounded retrieval retries when recovery is warranted AND exposes full retry telemetry so retry effectiveness is measurable. Adaptive behavior without observability creates invisible instability — so execution and telemetry were built in the same pass.
+
+### Step 4.23: Controlled retrieval retry execution
+
+**What:** The retrieval pipeline now performs a single bounded retry when `retrieval_recovery_eligible` is true. The retry uses a modified retrieval strategy (increased `top_k`, relaxed similarity threshold, adjacent lifecycle stages allowed), re-processes the new chunks through the full pipeline (`process_retrieved_chunks`), and keeps the better result based on confidence comparison.
+
+**Implementation in `retrieval_pipeline.py`:**
+
+The `build_retrieval_context()` function was refactored:
+- Core chunk processing (filtering → noise suppression → lifecycle extraction → selection → LLM refinement → validation → confidence → distillation → evidence → timeline) was extracted into `process_retrieved_chunks()` — reusable for both initial retrieval and retry
+- After initial retrieval, if `retrieval_recovery_eligible` is true:
+  1. Builds recovery strategy via `build_recovery_strategy()`
+  2. Applies strategy to retrieval options (`apply_recovery_strategy()` — increases `top_k`, relaxes thresholds)
+  3. Executes retry: `store.search()` with modified options → `process_retrieved_chunks()` on retry results
+  4. Compares retry confidence against initial confidence
+  5. Keeps whichever result has higher confidence — retry does NOT blindly replace
+
+**Key design decisions:**
+- **Single retry only** — no recursive retries, no infinite loops, no autonomous retry planning
+- **Confidence-gated replacement** — retry result only replaces initial if `retry_confidence > retrieval_confidence`
+- **Full pipeline re-execution** — retry chunks go through the same filtering, selection, validation, and distillation as initial retrieval, not a shortcut
+
+### Step 4.24: Retry effectiveness telemetry
+
+**What:** Made adaptive retrieval fully observable by exposing retry state as first-class execution telemetry, not hidden behavior.
+
+**`app/core/types.py`** — `ExecutionResult` expanded:
+- `retry_attempted: bool` — whether a retry actually executed
+- `initial_retrieval_confidence: float` — confidence before retry
+- `final_retrieval_confidence: float` — confidence after retry (or same as initial if no retry)
+- `retry_confidence_delta: float` — confidence improvement (or degradation)
+
+**`retrieval_pipeline.py`** — Propagates telemetry through `retrieval_context`:
+```python
+retrieval_context["retry_attempted"] = retry_attempted
+retrieval_context["initial_retrieval_confidence"] = initial_retrieval_confidence
+retrieval_context["final_retrieval_confidence"] = retrieval_context.get("retrieval_confidence", 0.0)
+retrieval_context["retry_confidence_delta"] = retry_confidence_delta
+```
+
+**`rag_pipeline.py`** — Extracts retry telemetry from `retrieval_context` and includes it in `ExecutionResult`.
+
+**What retry telemetry enables:**
+
+| Question | Now measurable |
+|----------|---------------|
+| Are retries helping? | `retry_confidence_delta > 0` |
+| Are retries increasing hallucinations? | Compare quality scores with/without retry |
+| Which queries trigger retries most? | Filter by `retry_attempted = True` |
+| Is retry quality improving over time? | Track delta trends |
+| Is retry logic worth keeping? | Aggregate success rate |
+
+**The architectural transition:**
+
+| Before | After |
+|--------|-------|
+| Retrieval failures are terminal | Retrieval failures trigger bounded recovery |
+| Adaptive retrieval is hidden behavior | Adaptive retrieval is observable orchestration state |
+| Recovery effectiveness unmeasurable | Confidence delta exposes retry value |
+| Static retrieval — same strategy always | Dynamic retrieval with telemetry-visible adaptation |
+
+**What this step did NOT change:**
+- Single retry only — no multiple retries, no recursive retries, no autonomous retry planning
+- Retry is confidence-gated, not always-replace
+- Recovery strategy is static (`build_recovery_strategy()`) — not yet dynamically tuned per query or failure type
+- Retry metrics are exposed in `ExecutionResult` but not yet consumed by the eval system for automated benchmarking
+
+**Important — correct rollout sequencing for adaptive systems:**
+
+| Phase | Purpose | Status |
+|-------|---------|--------|
+| Detect | Identify weak retrieval | Done (Steps 4.10, 4.20, 4.21) |
+| Decide | Determine if recovery is warranted | Done (Step 4.22) |
+| Execute | Perform bounded retry | Done (Step 4.23) |
+| Observe | Measure retry effectiveness | Done (Step 4.24) |
+| Tune | Optimize retry policies based on data | Next frontier |
+
+Enterprise AI principle: adaptive systems without telemetry become invisible instability systems.

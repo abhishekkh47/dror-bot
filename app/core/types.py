@@ -143,3 +143,7 @@ class ExecutionResult(BaseModel):
     selected_chunks: list
     lifecycle_drift_issues: list[str]
     retrieval_recovery_eligible: bool
+    retry_attempted: bool = False
+    initial_retrieval_confidence: float = 0.0
+    final_retrieval_confidence: float = 0.0
+    retry_confidence_delta: float = 0.0

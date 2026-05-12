@@ -63,6 +63,9 @@ def build_retrieval_context(
             0.0
         )
     )
+    initial_retrieval_confidence = retrieval_confidence
+    retry_attempted = False
+    retry_confidence_delta = 0.0
 
     # Adaptive retrieval recovery
     retrieval_recovery_eligible = (
@@ -76,6 +79,7 @@ def build_retrieval_context(
 
     # Controlled single retry
     if retrieval_recovery_eligible:
+        retry_attempted = True
         recovery_strategy = (
             build_recovery_strategy()
         )
@@ -103,10 +107,26 @@ def build_retrieval_context(
                 0.0
             )
         )
+        retry_confidence_delta = (
+            retry_confidence - initial_retrieval_confidence
+        )
         # Keep better retrieval result
         if retry_confidence > retrieval_confidence:
             retrieval_context = retry_context
 
+    retrieval_context["retry_attempted"] = retry_attempted
+    retrieval_context["initial_retrieval_confidence"] = (
+        initial_retrieval_confidence
+    )
+    retrieval_context["final_retrieval_confidence"] = (
+        retrieval_context.get(
+            "retrieval_confidence",
+            0.0
+        )
+    )
+    retrieval_context["retry_confidence_delta"] = (
+        retry_confidence_delta
+    )
     return retrieval_context
 
 def process_retrieved_chunks(

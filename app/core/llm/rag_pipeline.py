@@ -148,6 +148,29 @@ def ask_with_context(query: str, step):
         lifecycle_timeline = retrieval_context["lifecycle_timeline"]
         selected_chunks = retrieval_context["selected_chunks"]
 
+        retry_attempted = retrieval_context.get(
+            "retry_attempted",
+            False
+        )
+        initial_retrieval_confidence = (
+            retrieval_context.get(
+                "initial_retrieval_confidence",
+                retrieval_confidence,
+            )
+        )
+        final_retrieval_confidence = (
+            retrieval_context.get(
+                "final_retrieval_confidence",
+                retrieval_confidence,
+            )
+        )
+        retry_confidence_delta = (
+            retrieval_context.get(
+                "retry_confidence_delta",
+                0.0,
+            )
+        )
+
         lifecycle_drift_issues = detect_lifecycle_drift(
             lifecycle_facts=lifecycle_facts,
             selected_chunks=selected_chunks,
@@ -249,6 +272,10 @@ def ask_with_context(query: str, step):
             selected_chunks=selected_chunks,
             lifecycle_drift_issues=lifecycle_drift_issues,
             retrieval_recovery_eligible=retrieval_recovery_eligible,
+            retry_attempted=retry_attempted,
+            initial_retrieval_confidence=initial_retrieval_confidence,
+            final_retrieval_confidence=final_retrieval_confidence,
+            retry_confidence_delta=retry_confidence_delta,
         )
     except Exception as e:
         logger.error(f"Error asking with context: {e}")
