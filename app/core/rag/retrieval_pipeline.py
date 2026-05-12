@@ -1,6 +1,7 @@
 from app.core.llm.chunk_selector import select_relevant_chunks
 from app.core.llm.operational_distiller import distill_chunks
 from app.core.llm.operational_evidence import build_operational_evidence
+from app.core.memory.memory_retrieval import apply_memory_retrieval_boost
 from app.core.rag.ambiguity_detection import detect_operational_ambiguity
 from app.core.rag.evidence_attribution import build_evidence_attribution
 from app.core.rag.evidence_conflicts import detect_operational_conflicts
@@ -23,6 +24,7 @@ from app.core.rag.timeline_builder import build_lifecycle_timeline
 def build_retrieval_context(
     query,
     step,
+    session_memory=None,
 ):
     """
     Centralized retrieval orchestration layer.
@@ -43,6 +45,11 @@ def build_retrieval_context(
         step,
         top_k=retrieval_options["top_k"]
     )
+    if session_memory:
+        scored_chunks = apply_memory_retrieval_boost(
+            retrieved_chunks=scored_chunks,
+            session_memory=session_memory,
+        )
 
     diagnostic = RetrievalDiagnostic(
         chunk_counts={

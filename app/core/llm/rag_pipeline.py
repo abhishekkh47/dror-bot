@@ -100,7 +100,7 @@ def detect_response_intent(query: str):
 
     return "generic_failure"
 
-def ask_with_context(query: str, step):
+def ask_with_context(query: str, step, session_memory=None):
     """
     High-level RAG orchestration layer.
 
@@ -120,7 +120,7 @@ def ask_with_context(query: str, step):
         print("\nSTEP DOMAIN:", step.domain)
         print("STEP RAG TOPIC:", step.rag_topic)
 
-        retrieval_context = build_retrieval_context(query=query, step=step)
+        retrieval_context = build_retrieval_context(query=query, step=step, session_memory=session_memory)
         diagnostic = retrieval_context.get("diagnostic")
         # TEMP DEVELOPMENT RESPONSE
         if diagnostic and diagnostic.failed_stage:

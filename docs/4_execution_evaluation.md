@@ -875,3 +875,7 @@ Ambiguity penalty is lighter than conflict penalty — ambiguity reduces certain
 - Ambiguous patterns are minimal — will expand as more operational scenarios are observed
 
 **Important — do NOT over-suppress on ambiguity:** Ambiguity handling should calibrate certainty, not force "I don't know" excessively or suppress useful troubleshooting. Some ambiguity is normal in operational support — the system should communicate uncertainty, not refuse to help.
+
+---
+
+**Phase 5 is now complete.** The system has evolved from response-text evaluation to full execution-level evaluation with retrieval benchmarking, lifecycle drift detection, adaptive retrieval with retry telemetry, quality comparison, stability analysis, coherence scoring, conflict detection, reliability-aware response downgrading, evidence attribution, reasoning separation, and ambiguity detection. Retrieval intelligence is no longer the bottleneck — the next phase (Phase 6 — Conversational Memory & Investigation Continuity) is documented in `5_conversational_memory.md`.
