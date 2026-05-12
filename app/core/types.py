@@ -148,3 +148,4 @@ class ExecutionResult(BaseModel):
     final_retrieval_confidence: float = 0.0
     retry_confidence_delta: float = 0.0
     retrieval_stability_score: int = 100
+    lifecycle_coherence_score: int = 0

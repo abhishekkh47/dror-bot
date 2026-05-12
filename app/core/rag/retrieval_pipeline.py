@@ -2,6 +2,7 @@ from app.core.llm.chunk_selector import select_relevant_chunks
 from app.core.llm.operational_distiller import distill_chunks
 from app.core.llm.operational_evidence import build_operational_evidence
 from app.core.rag.lifecycle_chunk_selector import select_lifecycle_chunks
+from app.core.rag.lifecycle_coherence import score_lifecycle_coherence
 from app.core.rag.retrieval_comparator import compare_retrieval_quality
 from app.core.rag.retrieval_confidence import compute_retrieval_confidence
 from app.core.rag.retrieval_diagnostics import RetrievalDiagnostic, RetrievalStage
@@ -262,31 +263,21 @@ def process_retrieved_chunks(
         }
 
     # Confidence
-    retrieval_confidence = (
-        compute_retrieval_confidence(
-            selected_chunks=selected_chunks,
-            lifecycle_facts=lifecycle_facts,
-        )
+    retrieval_confidence = compute_retrieval_confidence(
+        selected_chunks=selected_chunks,
+        lifecycle_facts=lifecycle_facts,
     )
 
     # Distillation
-    distilled_chunks = distill_chunks(
-        selected_chunks
-    )
+    distilled_chunks = distill_chunks(selected_chunks)
 
     # Operational evidence
-    operational_evidence = (
-        build_operational_evidence(
-            lifecycle_facts
-        )
-    )
+    operational_evidence = build_operational_evidence(lifecycle_facts)
 
     # Timeline
-    lifecycle_timeline = (
-        build_lifecycle_timeline(
-            lifecycle_facts
-        )
-    )
+    lifecycle_timeline = build_lifecycle_timeline(lifecycle_facts)
+
+    lifecycle_coherence_score = score_lifecycle_coherence(lifecycle_timeline)
 
     return {
         "candidate_chunks": candidate_chunks,
@@ -298,4 +289,5 @@ def process_retrieved_chunks(
         "diagnostic": diagnostic,
         "retrieval_confidence": retrieval_confidence,
         "lifecycle_timeline": lifecycle_timeline,
+        "lifecycle_coherence_score": lifecycle_coherence_score,
     }

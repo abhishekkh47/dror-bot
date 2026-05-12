@@ -477,3 +477,60 @@ Some variability is healthy (retries finding better evidence means chunk composi
 - Scoring weights are approximate — infrastructure shape first, tuning via eval data later
 
 **Next step:** Step 4.27 — Lifecycle Evidence Coherence Scoring. The system still does not explicitly measure chronology coherence, causal consistency, operational narrative integrity, or lifecycle evidence alignment. That becomes the next major reasoning-quality frontier: evidence coherence engineering.
+
+---
+
+## Step 4.27: Lifecycle evidence coherence scoring
+
+**Category:** Operational Narrative Integrity
+
+**What:** Introduced lifecycle coherence scoring that measures whether retrieved evidence forms a valid operational narrative — not just whether individual chunks are relevant, high-confidence, and stable. The system now evaluates chronology continuity by matching the lifecycle timeline against known valid lifecycle flows.
+
+**The problem — relevance without coherence:**
+
+Retrieved evidence may individually be relevant, high confidence, and stable, yet collectively form a fragmented or incoherent chronology. Example: `processing_started`, `cancellation`, `refund_pending`, `authentication_required` may all be semantically relevant, yet the operational story becomes incoherent — there is no valid lifecycle flow that connects them. That creates confusing explanations, weak reasoning, and contradictory support guidance.
+
+**Key principle:** Operational correctness requires **evidence coherence**, not merely retrieval relevance.
+
+**What was built:**
+
+**`app/core/rag/lifecycle_coherence.py`** — `score_lifecycle_coherence(lifecycle_timeline)`:
+
+Defines canonical valid lifecycle flows and scores timeline adherence:
+
+```python
+VALID_LIFECYCLE_FLOWS = [
+    ["intent_created", "processing_started", "processing_failed", "transaction_cancelled"],
+    ["intent_created", "processing_started", "completed"],
+]
+```
+
+Scoring:
+- Normalizes timeline events (lowercase, strip periods)
+- For each valid flow, counts how many stages appear in the timeline
+- Score = `(matches / flow_length) * 100`, keeps the best match across all valid flows
+- Range: 0 (no coherence — timeline doesn't match any valid flow) to 100 (full chronology match)
+
+**Pipeline integration:**
+- `retrieval_pipeline.py` — computes coherence score inside `process_retrieved_chunks()` after timeline construction, includes in return dict
+- `rag_pipeline.py` — extracts `lifecycle_coherence_score` from retrieval context
+- `ExecutionResult` — expanded with `lifecycle_coherence_score: int = 0`
+
+**What this adds to the measurement stack:**
+
+| Metric | What it measures | Step |
+|--------|-----------------|------|
+| Retrieval confidence | Evidence strength | 4.10 |
+| Retrieval coverage | Lifecycle/operational diversity | 4.20 |
+| Lifecycle drift | Evidence contradictions | 4.21 |
+| Retrieval stability | Consistency across retries | 4.26 |
+| **Lifecycle coherence** | **Operational narrative integrity** | **4.27** |
+
+Previously the system could tell you: "retrieval is confident, stable, and non-contradictory." Now it can also tell you: "but the evidence doesn't form a coherent operational story" — a completely different failure mode.
+
+**What this step did NOT change:**
+- No retrieval logic changes — coherence is measured, not enforced
+- Valid lifecycle flows are hardcoded — will need expansion as more workflows are added
+- Coherence score is not yet used to gate generation or trigger retries
+
+**Next step:** Step 4.28 — Operational Evidence Conflict Detection. The system still does not explicitly detect conflicting operational claims, mutually incompatible evidence, contradictory failure causes, or impossible operational combinations. That becomes the next major reasoning integrity frontier: evidence conflict governance.
