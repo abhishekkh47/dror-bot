@@ -152,3 +152,4 @@ class ExecutionResult(BaseModel):
     operational_conflicts: list[str] = []
     response_reliability_score: int = 100
     evidence_attribution: dict = {}
+    reasoning_breakdown: dict = {}

@@ -20,6 +20,9 @@ for result in results:
     print("\nEVIDENCE ATTRIBUTION:")
     print(result.evidence_attribution)
 
+    print("\nREASONING BREAKDOWN:")
+    print(result.reasoning_breakdown)
+
     if result["failures"]:
         print("\nFAILURES:")
         for failure in result["failures"]:

@@ -5,6 +5,7 @@ from app.core.rag.evidence_attribution import build_evidence_attribution
 from app.core.rag.evidence_conflicts import detect_operational_conflicts
 from app.core.rag.lifecycle_chunk_selector import select_lifecycle_chunks
 from app.core.rag.lifecycle_coherence import score_lifecycle_coherence
+from app.core.rag.reasoning_separation import separate_grounded_and_inferred_reasoning
 from app.core.rag.retrieval_comparator import compare_retrieval_quality
 from app.core.rag.retrieval_confidence import compute_retrieval_confidence
 from app.core.rag.retrieval_diagnostics import RetrievalDiagnostic, RetrievalStage
@@ -286,6 +287,11 @@ def process_retrieved_chunks(
         lifecycle_facts=lifecycle_facts,
     )
 
+    reasoning_breakdown = separate_grounded_and_inferred_reasoning(
+        lifecycle_facts=lifecycle_facts,
+        operational_evidence=operational_evidence,
+    )
+
     # Timeline
     lifecycle_timeline = build_lifecycle_timeline(lifecycle_facts)
 
@@ -304,4 +310,5 @@ def process_retrieved_chunks(
         "lifecycle_coherence_score": lifecycle_coherence_score,
         "operational_conflicts": operational_conflicts,
         "evidence_attribution": evidence_attribution,
+        "reasoning_breakdown": reasoning_breakdown,
     }

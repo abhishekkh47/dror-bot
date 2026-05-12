@@ -743,3 +743,76 @@ This is NOT token-level attribution, attention visualization, SHAP-like reasonin
 This is no longer a chatbot return value. It is an **operational AI execution artifact**.
 
 **Next step:** Step 4.31 — Inference vs Grounded-Fact Separation. Responses still do not explicitly distinguish directly grounded facts from inferred operational conclusions. That becomes the next major enterprise trust frontier: reasoning transparency governance.
+
+---
+
+## Step 4.31: Inference vs grounded-fact separation
+
+**Category:** Reasoning Transparency Governance
+
+**What:** Introduced explicit separation between directly grounded operational facts and inferred conclusions. The system now tracks what was directly extracted from evidence versus what was reasoned from combining lifecycle facts — making inference chains visible instead of blended into the response.
+
+**The problem — blended facts and inference:**
+
+The system produces "The payment was cancelled because auto-completion failed" but cannot distinguish: Was "auto-completion failed" explicitly retrieved? Or inferred from chronology? Or inferred from the combination of cancellation + processing failure? Currently facts and interpretation are blended into one response, creating hidden inference chains, audit ambiguity, support confusion, and over-trust in generated conclusions.
+
+**Key principle:** Trustworthy systems must separate **evidence** from **interpretation**. Enterprise AI systems require inference transparency.
+
+**What was built:**
+
+**`app/core/rag/reasoning_separation.py`** — `separate_grounded_and_inferred_reasoning(lifecycle_facts, operational_evidence)`:
+
+Two output categories:
+
+**Grounded facts** (directly extracted from evidence):
+- `intent_created` → "Intent creation succeeded"
+- `processing_started` → "Processing started"
+- `processing_failed` → "Processing failure detected"
+- `transaction_cancelled` → "Transaction cancellation detected"
+
+**Inferred conclusions** (reasoned from combining facts):
+- `processing_failed + transaction_cancelled` → "Cancellation likely occurred after processing failure"
+- `processing_started + !processing_failed + !final_state` → "Transaction may still be in progress"
+
+**Example reasoning breakdown output:**
+```json
+{
+  "grounded_facts": [
+    "Intent creation succeeded",
+    "Processing started",
+    "Processing failure detected",
+    "Transaction cancellation detected"
+  ],
+  "inferred_conclusions": [
+    "Cancellation likely occurred after processing failure"
+  ]
+}
+```
+
+**Pipeline integration:**
+- `retrieval_pipeline.py` — builds reasoning breakdown inside `process_retrieved_chunks()` after evidence attribution, includes in return dict
+- `rag_pipeline.py` — extracts `reasoning_breakdown` from retrieval context
+- `ExecutionResult` — expanded with `reasoning_breakdown: dict = {}`
+- `run_eval.py` — optionally displays reasoning breakdown for debugging and reasoning audits
+
+**What this enables:**
+
+| Use case | How reasoning separation helps |
+|----------|-------------------------------|
+| Hallucination investigation | Check if conclusion was grounded or inferred |
+| Support debugging | Know which claims are directly supported |
+| Trust calibration | Weight grounded facts more than inferred conclusions |
+| Reasoning audits | Trace inference chains explicitly |
+| Regression analysis | Detect when inferred conclusions change across versions |
+
+**Important design decisions:**
+- **Operationally bounded:** NOT chain-of-thought exposure, NOT hidden reasoning dumps, NOT unrestricted internal traces. Only operationally relevant fact/inference separation
+- **Deterministic:** Inference rules are explicit conditional logic, not LLM self-reflection
+- **Internal telemetry:** Not yet exposed to end users — internal explainability for debugging and auditing
+
+**What this step did NOT change:**
+- No retrieval logic changes, no prompt changes
+- Reasoning breakdown does not yet influence generation behavior or response constraints
+- Inference rules are minimal — will expand as more lifecycle patterns are observed
+
+**Next step:** Step 4.32 — Operational Ambiguity Detection. The system still does not explicitly detect insufficient evidence, multiple plausible explanations, unresolved operational ambiguity, or equally likely failure causes. That becomes the next major enterprise trustworthiness frontier: ambiguity-aware reasoning governance.
