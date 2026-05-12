@@ -154,3 +154,67 @@ RETRIEVAL METRICS:
 - Metrics are displayed but not yet used for automated threshold-based regression alerts
 
 **Next step:** Step 4.21 — Lifecycle Drift Detection. The system still does not detect lifecycle inconsistencies across retrieval, chronology weakening, retrieval-stage conflicts, or operational evidence drift. That becomes the next major reliability and reasoning frontier.
+
+---
+
+## Step 4.21: Lifecycle drift detection
+
+**Category:** Operational Chronology Integrity
+
+**What:** Added retrieval-level lifecycle integrity validation that detects contradictory evidence across retrieved chunks before generation. The system now validates whether retrieved evidence forms a coherent chronology and flags operational invariant violations. This is **retrieval integrity validation** — a fundamentally different layer from response validation (Step 4.14) or prompt governance (Step 4.11).
+
+**The problem — inconsistent retrieval evidence:**
+
+Steps 4.14–4.15 validate generated reasoning and constrain response behavior, but the underlying retrieval evidence itself may already be inconsistent. Retrieved chunks may simultaneously imply `processing_started = True` and `intent creation failed`, or `cancellation before processing`, or `completion after rollback`. Even if generation constraints suppress some contradictions in the final response, the grounding is corrupted. Generated contradictions often originate from **inconsistent retrieval evidence**, not bad prompting.
+
+**Key principle:** Validating generated reasoning is necessary but insufficient. Enterprise systems must also validate **retrieval evidence consistency** — the integrity of the grounding layer itself.
+
+**What was built:**
+
+**`app/core/rag/lifecycle_drift.py`** — `detect_lifecycle_drift(lifecycle_facts, selected_chunks)`:
+
+Two categories of drift detection:
+
+1. **Lifecycle fact invariant violations:**
+   - `processing_started` without `intent_created` → "Processing started without intent creation"
+   - `transaction_cancelled` without `processing_started` → "Cancellation occurred without processing evidence"
+
+2. **Contradictory lifecycle stage co-occurrence in retrieved chunks:**
+   - Defined contradictory pairs (e.g., `intent_creation_failed` + `processing` cannot coexist)
+   - Scans metadata lifecycle stages across all selected chunks
+
+Returns a list of drift issues.
+
+**Pipeline integration:**
+- `rag_pipeline.py` — calls `detect_lifecycle_drift()` before generation reasoning validation, merges drift issues into `reasoning_issues` (lifecycle drift IS reasoning instability)
+- `ExecutionResult` — expanded with `lifecycle_drift_issues: list[str]` to expose drift separately from response reasoning issues
+
+**Validation layers after this step (each at a different architectural level):**
+
+| Layer | What it validates | When it runs |
+|-------|-------------------|--------------|
+| Retrieval validation (4.8) | Evidence sufficiency | After chunk selection |
+| Lifecycle drift detection (4.21) | Retrieval evidence consistency | Before generation |
+| Reasoning validation (4.14) | Generated response consistency | After generation |
+| Sanitization | Wording normalization | After validation |
+
+**What this changes architecturally:**
+
+| Before | After |
+|--------|-------|
+| Retrieval evidence assumed coherent | Retrieval evidence explicitly validated for chronology integrity |
+| Contradictions only caught post-generation | Contradictions detected at retrieval level before generation |
+| Prompt tuning blamed for contradictions | Retrieval evidence corruption exposed as root cause |
+
+**Expected effects:**
+- Contradictory retrieval evidence becomes detectable before it reaches the model
+- Debugging shifts from "why did the model say X?" to "why did retrieval contain conflicting evidence?"
+- Retrieval tuning becomes safer — lifecycle integrity is now measured
+
+**Important — do NOT massively expand drift rules yet:** Focus on high-signal operational invariants and chronology integrity. This is drift detection infrastructure, not a giant rule engine.
+
+**What this step did NOT change:**
+- No retrieval logic changes — drift is detected, not corrected
+- Drift issues are logged and tracked in `ExecutionResult`, not yet used to trigger retrieval retries or correction
+
+**Next step:** Step 4.22 — Adaptive Retrieval Correction. The system can now detect weak retrieval, lifecycle drift, low confidence, and evidence insufficiency — but it still cannot adapt retrieval behavior dynamically. Retrieval retries, dynamic filtering relaxation, retrieval expansion, evidence recovery, and adaptive chunk selection become the next frontier: **self-correcting retrieval infrastructure**.

@@ -4,6 +4,7 @@ from app.core.llm.llm import generate_response
 from app.core.rag.confidence_policy import build_confidence_policy
 from app.core.rag.context_builder import build_structured_context
 from app.core.rag.fallback_policy import determine_response_mode
+from app.core.rag.lifecycle_drift import detect_lifecycle_drift
 from app.core.rag.reasoning_validator import validate_reasoning_consistency
 from app.core.rag.response_governance import build_response_constraints
 from app.core.rag.retrieval_debugger import print_retrieval_trace
@@ -183,6 +184,14 @@ def ask_with_context(query: str, step):
                 }
             )
         
+        reasoning_issues.extend(
+            lifecycle_drift_issues
+        )
+        lifecycle_drift_issues = detect_lifecycle_drift(
+            lifecycle_facts=lifecycle_facts,
+            selected_chunks=selected_chunks,
+        )
+        
         response_mode = determine_response_mode(
             retrieval_confidence=retrieval_confidence,
             reasoning_issues=reasoning_issues,
@@ -216,6 +225,7 @@ def ask_with_context(query: str, step):
             response_mode=response_mode,
             quality_score=quality_score,
             selected_chunks=selected_chunks,
+            lifecycle_drift_issues=lifecycle_drift_issues,
         )
     except Exception as e:
         logger.error(f"Error asking with context: {e}")

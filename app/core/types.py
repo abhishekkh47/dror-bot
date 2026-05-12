@@ -141,3 +141,4 @@ class ExecutionResult(BaseModel):
     reasoning_issues: List[str]
     quality_score: int
     selected_chunks: list
+    lifecycle_drift_issues: list[str]
