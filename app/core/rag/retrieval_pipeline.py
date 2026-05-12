@@ -2,6 +2,7 @@ from app.core.llm.chunk_selector import select_relevant_chunks
 from app.core.llm.operational_distiller import distill_chunks
 from app.core.llm.operational_evidence import build_operational_evidence
 from app.core.rag.lifecycle_chunk_selector import select_lifecycle_chunks
+from app.core.rag.retrieval_comparator import compare_retrieval_quality
 from app.core.rag.retrieval_confidence import compute_retrieval_confidence
 from app.core.rag.retrieval_diagnostics import RetrievalDiagnostic, RetrievalStage
 from app.core.rag.retrieval_recovery import apply_recovery_strategy, build_recovery_strategy, should_retry_retrieval
@@ -111,7 +112,14 @@ def build_retrieval_context(
             retry_confidence - initial_retrieval_confidence
         )
         # Keep better retrieval result
-        if retry_confidence > retrieval_confidence:
+        retry_is_better = (
+            compare_retrieval_quality(
+                initial_context=retrieval_context,
+                retry_context=retry_context,
+            )
+        )
+
+        if retry_is_better:
             retrieval_context = retry_context
 
     retrieval_context["retry_attempted"] = retry_attempted

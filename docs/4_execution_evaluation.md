@@ -362,3 +362,64 @@ retrieval_context["retry_confidence_delta"] = retry_confidence_delta
 | Tune | Optimize retry policies based on data | Next frontier |
 
 Enterprise AI principle: adaptive systems without telemetry become invisible instability systems.
+
+---
+
+## Step 4.25: Retrieval quality comparison engine
+
+**Category:** Adaptive Retrieval Evaluation
+
+**What:** Replaced the primitive single-metric retry evaluation (`retry_confidence > initial_confidence`) with a multi-factor retrieval quality comparison engine. Retries are now selected based on holistic retrieval quality — confidence, chunk coverage, and lifecycle timeline completeness — not just a single confidence score.
+
+**The problem — confidence is a weak retrieval quality signal:**
+
+Higher confidence does NOT necessarily mean better evidence, cleaner chronology, lower hallucination risk, or safer operational reasoning. A retry may retrieve more chunks, increase metadata diversity, and increase the confidence score — while simultaneously introducing noisy troubleshooting chunks, contradictory lifecycle evidence, infra leakage, and hallucination risk. The previous logic (`if retry_confidence > retrieval_confidence: keep retry`) could not detect this — creating noisy retry upgrades, hidden retrieval degradation, and unstable chronology grounding.
+
+**Key principle:** Adaptive retrieval should optimize **retrieval quality**, not merely confidence score.
+
+**What was built:**
+
+**`app/core/rag/retrieval_comparator.py`** — `compare_retrieval_quality(initial_context, retry_context)`:
+
+Multi-factor scoring comparison:
+
+| Signal | Weight | Why |
+|--------|--------|-----|
+| Retrieval confidence | × 100 | Evidence strength estimation |
+| Chunk count (capped at 5) | × 5 per chunk | Evidence volume (bounded to prevent noise reward) |
+| Lifecycle timeline length | × 5 per event | Chronology completeness |
+
+Computes separate scores for initial and retry, returns `True` if retry score exceeds initial.
+
+**Pipeline integration:** In `retrieval_pipeline.py`, the old confidence-only comparison was replaced:
+
+```python
+# Before: if retry_confidence > retrieval_confidence
+# After:
+retry_is_better = compare_retrieval_quality(
+    initial_context=retrieval_context,
+    retry_context=retry_context,
+)
+if retry_is_better:
+    retrieval_context = retry_context
+```
+
+**What this changes:**
+
+| Before | After |
+|--------|-------|
+| Retry evaluated by confidence only | Retry evaluated by confidence + coverage + timeline |
+| Noisy retries accepted if confidence higher | Noisy retries rejected if evidence quality lower |
+| Adaptive retrieval optimizes one metric | Adaptive retrieval optimizes holistic quality |
+
+**Design decisions:**
+- Chunk count capped at 5 to prevent rewarding evidence volume over evidence quality
+- Scoring is intentionally simple and deterministic — retrieval quality comparison infrastructure, not mathematically optimal retrieval scoring
+- Explainable, bounded, observable — not an opaque scoring system
+
+**What this step did NOT change:**
+- No retrieval logic changes, no prompt changes
+- Scoring weights are not tuned — infrastructure shape first
+- Does not yet incorporate reasoning drift, knowledge type diversity, or transport suppression quality into comparison
+
+**Next step:** Step 4.26 — Retrieval Stability Analysis. The system still does not measure retrieval consistency across retries, retrieval volatility, unstable chunk selection, metadata instability, or lifecycle fluctuation. That becomes the next major reliability frontier: retrieval stability engineering.
