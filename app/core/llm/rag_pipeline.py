@@ -170,6 +170,12 @@ def ask_with_context(query: str, step):
                 0.0,
             )
         )
+        retrieval_stability_score = (
+            retrieval_context.get(
+                "retrieval_stability_score",
+                100,
+            )
+        )
 
         lifecycle_drift_issues = detect_lifecycle_drift(
             lifecycle_facts=lifecycle_facts,
@@ -276,6 +282,7 @@ def ask_with_context(query: str, step):
             initial_retrieval_confidence=initial_retrieval_confidence,
             final_retrieval_confidence=final_retrieval_confidence,
             retry_confidence_delta=retry_confidence_delta,
+            retrieval_stability_score=retrieval_stability_score,
         )
     except Exception as e:
         logger.error(f"Error asking with context: {e}")

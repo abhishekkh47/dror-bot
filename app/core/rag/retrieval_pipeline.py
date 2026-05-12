@@ -10,6 +10,7 @@ from app.core.rag.retrieval_rules import is_noise_chunk
 from app.core.llm.lifecycle_extractor import extract_lifecycle_facts
 from app.core.rag.retrieval_filtering import apply_structured_filters
 from app.core.llm.retriever import store
+from app.core.rag.retrieval_stability import analyze_retrieval_stability
 from app.core.rag.retrieval_validator import validate_retrieval_quality
 from app.core.rag.timeline_builder import build_lifecycle_timeline
 
@@ -67,6 +68,7 @@ def build_retrieval_context(
     initial_retrieval_confidence = retrieval_confidence
     retry_attempted = False
     retry_confidence_delta = 0.0
+    retrieval_stability_score = 100
 
     # Adaptive retrieval recovery
     retrieval_recovery_eligible = (
@@ -95,18 +97,18 @@ def build_retrieval_context(
             step,
             top_k=retrieval_options["top_k"]
         )
-        retry_context = (
-            process_retrieved_chunks(
-                retrieved_chunks=retry_chunks,
-                query=query,
-                step=step,
-            )
+        retry_context = process_retrieved_chunks(
+            retrieved_chunks=retry_chunks,
+            query=query,
+            step=step,
         )
-        retry_confidence = (
-            retry_context.get(
-                "retrieval_confidence",
-                0.0
-            )
+        retrieval_stability_score = analyze_retrieval_stability(
+            initial_context=retrieval_context,
+            retry_context=retry_context,
+        )
+        retry_confidence = retry_context.get(
+            "retrieval_confidence",
+            0.0
         )
         retry_confidence_delta = (
             retry_confidence - initial_retrieval_confidence
@@ -123,18 +125,10 @@ def build_retrieval_context(
             retrieval_context = retry_context
 
     retrieval_context["retry_attempted"] = retry_attempted
-    retrieval_context["initial_retrieval_confidence"] = (
-        initial_retrieval_confidence
-    )
-    retrieval_context["final_retrieval_confidence"] = (
-        retrieval_context.get(
-            "retrieval_confidence",
-            0.0
-        )
-    )
-    retrieval_context["retry_confidence_delta"] = (
-        retry_confidence_delta
-    )
+    retrieval_context["initial_retrieval_confidence"] = initial_retrieval_confidence
+    retrieval_context["final_retrieval_confidence"] = retrieval_context.get("retrieval_confidence",0.0)
+    retrieval_context["retry_confidence_delta"] = retry_confidence_delta
+    retrieval_context["retrieval_stability_score"] = retrieval_stability_score
     return retrieval_context
 
 def process_retrieved_chunks(

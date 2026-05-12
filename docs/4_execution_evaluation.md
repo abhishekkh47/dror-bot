@@ -423,3 +423,57 @@ if retry_is_better:
 - Does not yet incorporate reasoning drift, knowledge type diversity, or transport suppression quality into comparison
 
 **Next step:** Step 4.26 — Retrieval Stability Analysis. The system still does not measure retrieval consistency across retries, retrieval volatility, unstable chunk selection, metadata instability, or lifecycle fluctuation. That becomes the next major reliability frontier: retrieval stability engineering.
+
+---
+
+## Step 4.26: Retrieval stability analysis
+
+**Category:** Retrieval Reliability Engineering
+
+**What:** Introduced retrieval stability scoring that measures consistency between initial retrieval and retry retrieval. The system now evaluates adaptive retrieval on both **quality** (Step 4.25) and **stability** — detecting when retries produce volatile, inconsistent evidence even if quality scores improve.
+
+**The problem — quality without stability:**
+
+The quality comparison engine (Step 4.25) determines which retrieval is better. But it does not measure whether retrieval behavior is consistent. The same query may produce different lifecycle stages, different chunk compositions, different confidence levels, and different operational conclusions across retries — even when the query barely changed. That is **retrieval volatility**, and it leads to unstable reasoning, inconsistent support answers, trust degradation, and debugging nightmares.
+
+**Key principle:** Enterprise retrieval systems need BOTH retrieval quality AND retrieval stability. A highly variable system becomes operationally unpredictable even when individual retrievals are acceptable.
+
+**What was built:**
+
+**`app/core/rag/retrieval_stability.py`** — `analyze_retrieval_stability(initial_context, retry_context)`:
+
+Starts at 100 (perfectly stable), penalizes volatility across three dimensions:
+
+| Signal | Max penalty | What it measures |
+|--------|-------------|-----------------|
+| Chunk overlap ratio | -40 | How many of the same chunks survived across attempts (low overlap = high volatility) |
+| Confidence fluctuation | -30 | Absolute confidence delta between attempts (large swings = instability) |
+| Lifecycle timeline overlap | -30 | Whether the same lifecycle events appear in both timelines (divergent chronology = dangerous) |
+
+Score range: 0 (completely unstable) to 100 (perfectly stable).
+
+**Pipeline integration:**
+- `retrieval_pipeline.py` — computes stability score inside the retry block (comparing initial and retry contexts), defaults to 100 when no retry attempted, propagates through `retrieval_context`
+- `rag_pipeline.py` — extracts `retrieval_stability_score` from retrieval context
+- `ExecutionResult` — expanded with `retrieval_stability_score: int = 100`
+
+**What this changes:**
+
+| Before | After |
+|--------|-------|
+| Adaptive retrieval evaluated by quality only | Evaluated by quality + stability |
+| Volatile retries invisible | Volatility measured and exposed |
+| Chunk composition changes untracked | Chunk overlap ratio quantified |
+| Confidence swings undetected | Confidence fluctuation penalized |
+| Timeline divergence unmeasured | Lifecycle timeline overlap tracked |
+
+**Important — stability != rigidity:**
+
+Some variability is healthy (retries finding better evidence means chunk composition changes). The goal is measuring **volatility risk**, not enforcing rigid determinism. Over-penalizing variation would freeze retrieval diversity.
+
+**What this step did NOT change:**
+- No retrieval logic changes — stability is measured, not enforced
+- Stability score is exposed in `ExecutionResult` but not yet used to gate retry acceptance (future evolution)
+- Scoring weights are approximate — infrastructure shape first, tuning via eval data later
+
+**Next step:** Step 4.27 — Lifecycle Evidence Coherence Scoring. The system still does not explicitly measure chronology coherence, causal consistency, operational narrative integrity, or lifecycle evidence alignment. That becomes the next major reasoning-quality frontier: evidence coherence engineering.
