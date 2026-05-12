@@ -8,6 +8,8 @@ This phase pauses all retrieval logic, prompt, eval, and sanitizer work. The fou
 
 **Mental shift:** The system is no longer organizing *documents*. It is organizing **operational knowledge units**. That is a fundamentally different design challenge.
 
+**Phase 4 is now complete.** The system has evolved from topic-string retrieval to a fully governed operational retrieval infrastructure with metadata-driven filtering, lifecycle-aware scoring, structured context assembly, evidence attribution, timeline reconstruction, reasoning validation, confidence-aware behavior, fallback handling, and structured execution results. The next phase (Phase 5 — Execution Evaluation & Reliability) is documented in `4_execution_evaluation.md`.
+
 ---
 
 ## Step 4.17–4.18: Evaluation metrics + structured execution result contracts
