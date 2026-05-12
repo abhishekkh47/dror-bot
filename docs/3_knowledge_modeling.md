@@ -10,6 +10,80 @@ This phase pauses all retrieval logic, prompt, eval, and sanitizer work. The fou
 
 ---
 
+## Step 4.15: Confidence-aware response behavior
+
+**Category:** Adaptive Operational Response Control
+
+**What:** Made retrieval confidence operationally meaningful by introducing a confidence policy layer that adapts generation behavior based on evidence strength. Confidence now governs allowed response tone, causal reasoning freedom, operational conclusion strength, and uncertainty language requirements. Also improved reasoning validation from string-based logging to structured operational telemetry.
+
+**The problem — confidence without behavioral adaptation:**
+
+Step 4.10 computed `retrieval_confidence`, but it was only diagnostic metadata and logging output. A response generated from strong evidence and one generated from weak partial evidence still sounded equally authoritative. Low-confidence retrieval could still produce "The payment failed because auto-completion failed" even when evidence was partial, lifecycle grounding was incomplete, and operational reasoning was weak. That creates **authoritative hallucinations** — one of the worst enterprise AI failure modes.
+
+**Key principle:** Confidence is useless unless behavior changes because of it.
+
+**What was built — two components:**
+
+1. **`app/core/rag/confidence_policy.py`** — `build_confidence_policy(retrieval_confidence)`:
+
+| Confidence | Tone | Causal reasoning | Operational conclusions | Uncertainty language |
+|------------|------|-------------------|------------------------|---------------------|
+| >= 0.75 | confident | allowed | allowed | not required |
+| >= 0.45 | moderate | allowed | allowed | required |
+| < 0.45 | cautious | NOT allowed | NOT allowed | required |
+
+This is NOT model confidence (self-assessment). This is **retrieval evidence confidence policy** — the governance layer decides what generation is allowed to do, not the model itself.
+
+2. **Reasoning validation improved to structured telemetry:**
+
+Reasoning issues logging upgraded from string-based to structured `extra` metadata:
+```python
+logger.warning(
+    "Reasoning consistency validation failed",
+    extra={
+        "issues": reasoning_issues,
+        "query": query,
+        "retrieval_confidence": retrieval_confidence,
+    }
+)
+```
+
+This transitions from random string logs to structured operational telemetry — foundational for dashboards, analytics, failure clustering, and regression analysis.
+
+**Pipeline integration:**
+- `rag_pipeline.py` — computes `confidence_policy` after `response_constraints`, passes both to prompt builder
+- `prompt.py` — `build_prompt_with_step()` accepts `confidence_policy`, formats it as a `CONFIDENCE_POLICY` section in the prompt template alongside `RESPONSE_CONSTRAINTS`
+
+**Example behavior change:**
+
+High confidence: "The payment processing failed during auto-completion."
+
+Low confidence: "The available evidence suggests the payment may have failed during processing, but the exact operational cause is unclear."
+
+That difference is massive for enterprise trustworthiness.
+
+**Why reasoning validation is logging-only (intentional design):**
+
+The reasoning validator (Step 4.14) currently only logs issues, not blocks responses. This is intentional **observability-first rollout** — the correct governance rollout sequence:
+
+| Stage | Purpose |
+|-------|---------|
+| Observe | Detect what contradictions occur |
+| Measure | Understand frequency and false positive rate |
+| Tune | Reduce false positives, refine rules |
+| Enforce | Block/recover/regenerate |
+
+The validator rules are still primitive (only chronology and cancellation checks). Making them immediately blocking would cause excessive rejection, false positives, and brittle behavior. Later, `reasoning_issues` will drive regeneration, fallback responses, confidence downgrades, escalation behavior, and response suppression — but only after the rules are proven reliable through observation.
+
+**What this step did NOT change:**
+- No retrieval changes, no embedding changes
+- Confidence policy is injected into prompts but does not yet trigger fundamentally different response paths (e.g., escalation, regeneration)
+- Reasoning validation remains observability-only
+
+**Next step:** Step 4.16 — Operational Escalation & Fallback Handling. Very low-confidence situations should ask clarifying questions, request additional evidence, recommend support escalation, or avoid speculative troubleshooting — instead of attempting operational reasoning on weak evidence.
+
+---
+
 ## Step 4.14: Contradiction detection & reasoning consistency
 
 **Category:** Operational Reasoning Validation

@@ -151,7 +151,8 @@ def build_prompt_with_step(
     response_pattern: str,
     failure_summary: dict,
     operational_evidence: list[str],
-    response_constraints: list[str]
+    response_constraints: list[str],
+    confidence_policy: dict
 ) -> str:
     evidence_block = "\n".join([
         f"- {item}"
@@ -161,6 +162,11 @@ def build_prompt_with_step(
     constraints_block = "\n".join([
         f"- {constraint}"
         for constraint in response_constraints
+    ])
+
+    confidence_policy_block = "\n".join([
+        f"- {key}: {value}"
+        for key, value in confidence_policy.items()
     ])
 
     return PROMPT_TEMPLATE.format(
@@ -183,4 +189,6 @@ def build_prompt_with_step(
         response_rules=RESPONSE_RULES,
         response_constraints=response_constraints,
         response_pattern=response_pattern,
+        constraints_block=constraints_block,
+        confidence_policy_block=confidence_policy_block,
     )

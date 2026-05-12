@@ -1,6 +1,7 @@
 from app.core.llm.retriever import retrieve_context
 from app.core.llm.prompt import build_prompt, build_prompt_with_step
 from app.core.llm.llm import generate_response
+from app.core.rag.confidence_policy import build_confidence_policy
 from app.core.rag.context_builder import build_structured_context
 from app.core.rag.reasoning_validator import validate_reasoning_consistency
 from app.core.rag.response_governance import build_response_constraints
@@ -141,6 +142,8 @@ def ask_with_context(query: str, step):
             retrieval_confidence=retrieval_confidence,
             lifecycle_facts=lifecycle_facts,
         )
+        
+        confidence_policy = build_confidence_policy(retrieval_confidence)
 
         response_intent = detect_response_intent(query)
         response_pattern = RESPONSE_PATTERNS.get(
@@ -156,6 +159,7 @@ def ask_with_context(query: str, step):
             failure_summary=lifecycle_facts,
             operational_evidence=operational_evidence,
             response_constraints=response_constraints,
+            confidence_policy=confidence_policy,
         )
 
         response = generate_response(prompt)
@@ -167,8 +171,12 @@ def ask_with_context(query: str, step):
         )
         if reasoning_issues:
             logger.warning(
-                f"Reasoning consistency issues: "
-                f"{reasoning_issues}"
+                "Reasoning consistency validation failed",
+                extra={
+                    "issues": reasoning_issues,
+                    "query": query,
+                    "retrieval_confidence": retrieval_confidence,
+                }
             )
 
         return sanitize_response(response)
