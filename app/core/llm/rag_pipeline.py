@@ -10,6 +10,7 @@ from app.core.rag.response_governance import build_response_constraints
 from app.core.rag.retrieval_debugger import print_retrieval_trace
 from app.core.rag.retrieval_metadata import get_capability, get_lifecycle_stage
 from app.core.rag.retrieval_pipeline import build_retrieval_context
+from app.core.rag.retrieval_recovery import build_recovery_strategy, should_retry_retrieval
 from app.core.types import ExecutionResult
 from app.tests.evals.evaluation_metrics import score_response_quality
 from app.utils.patterns import RESPONSE_PATTERNS, CONTRADICTION_PATTERNS, CLEANUP_PATTERNS, INTERNAL_PATTERNS
@@ -187,6 +188,22 @@ def ask_with_context(query: str, step):
         reasoning_issues.extend(
             lifecycle_drift_issues
         )
+        
+        retrieval_recovery_triggered = (
+            should_retry_retrieval(
+                retrieval_confidence=
+                    retrieval_confidence,
+
+                lifecycle_drift_issues=
+                    lifecycle_drift_issues,
+            )
+        )
+        recovery_strategy = None
+        if retrieval_recovery_triggered:
+            recovery_strategy = (
+                build_recovery_strategy()
+            )
+
         lifecycle_drift_issues = detect_lifecycle_drift(
             lifecycle_facts=lifecycle_facts,
             selected_chunks=selected_chunks,
@@ -226,6 +243,7 @@ def ask_with_context(query: str, step):
             quality_score=quality_score,
             selected_chunks=selected_chunks,
             lifecycle_drift_issues=lifecycle_drift_issues,
+            retrieval_recovery_triggered=retrieval_recovery_triggered,
         )
     except Exception as e:
         logger.error(f"Error asking with context: {e}")

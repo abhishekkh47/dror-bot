@@ -218,3 +218,62 @@ Returns a list of drift issues.
 - Drift issues are logged and tracked in `ExecutionResult`, not yet used to trigger retrieval retries or correction
 
 **Next step:** Step 4.22 — Adaptive Retrieval Correction. The system can now detect weak retrieval, lifecycle drift, low confidence, and evidence insufficiency — but it still cannot adapt retrieval behavior dynamically. Retrieval retries, dynamic filtering relaxation, retrieval expansion, evidence recovery, and adaptive chunk selection become the next frontier: **self-correcting retrieval infrastructure**.
+
+---
+
+## Step 4.22: Adaptive retrieval correction (detection phase)
+
+**Category:** Self-Correcting Retrieval Infrastructure
+
+**What:** Introduced adaptive retrieval recovery decision infrastructure — the system now determines whether retrieval should attempt recovery based on confidence and lifecycle drift, and builds a recovery strategy. This step is the **detection and decision phase** — recovery execution comes in the next step. Correct rollout: detect → decide → THEN execute.
+
+**The problem — detection without adaptation:**
+
+The system can detect low confidence, weak coverage, lifecycle drift, and reasoning instability. But retrieval behavior remains static — same strategy, same filters, same selection logic, same retrieval depth regardless of detected quality. Weak retrieval produces unnecessary fallback responses, missing evidence, incomplete chronology, and weak operational reasoning. Detection without adaptation is incomplete.
+
+**Key principle:** If the system can detect retrieval weakness, it should eventually attempt recovery.
+
+**What was built:**
+
+**`app/core/rag/retrieval_recovery.py`** — Two functions:
+
+1. `should_retry_retrieval(retrieval_confidence, lifecycle_drift_issues)`:
+   - Returns `True` if `retrieval_confidence < 0.35` (evidence too weak)
+   - Returns `True` if `lifecycle_drift_issues` exist (evidence internally contradictory)
+   - Returns `False` otherwise
+   - Deterministic and bounded — NOT recursive agents, NOT infinite retry loops, NOT LLM-driven retrieval planning
+
+2. `build_recovery_strategy()`:
+   - Returns recovery parameters: `increase_top_k`, `relax_similarity_threshold`, `allow_adjacent_lifecycle_stages`
+   - Strategy is built but NOT YET EXECUTED — infrastructure shape first
+
+**Pipeline integration:**
+- `rag_pipeline.py` — after lifecycle drift detection and reasoning issue merging, calls `should_retry_retrieval()` and conditionally builds `recovery_strategy`
+- `ExecutionResult` — expanded with `retrieval_recovery_triggered: bool` to expose whether recovery was warranted
+
+**What this changes architecturally:**
+
+| Before | After |
+|--------|-------|
+| Retrieval failures are terminal states | Recoverable retrieval failures are identified |
+| Static retrieval — same strategy always | Adaptive retrieval state exposed |
+| Detection without action | Detection → decision → (future) execution |
+
+**Why recovery is not executed yet:**
+
+Executing retries without proper infrastructure creates runaway retrieval, noisy evidence expansion, and retrieval instability. The correct sequencing:
+
+| Phase | Purpose | Status |
+|-------|---------|--------|
+| Detect | Identify weak retrieval | Done (Steps 4.10, 4.20, 4.21) |
+| Decide | Determine if recovery is warranted | Done (this step) |
+| Execute | Perform bounded retries | Next step (4.23) |
+
+Observability, retry policies, retry metrics, retry boundaries, and retry safety must exist before execution.
+
+**What this step did NOT change:**
+- No retrieval logic changes — recovery is decided but not executed
+- No retry loops, no re-retrieval, no filtering relaxation yet
+- Recovery strategy is a static policy — not yet dynamically tuned per query
+
+**Next step:** Step 4.23 — Controlled Retrieval Retry Execution. The system actually performs bounded retries: adaptive top-k expansion, similarity threshold relaxation, adjacent lifecycle recovery, evidence augmentation. The first true adaptive retrieval execution layer.
