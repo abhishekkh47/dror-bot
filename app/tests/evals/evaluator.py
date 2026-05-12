@@ -2,6 +2,7 @@ from app.core.llm.rag_pipeline import ask_with_context
 
 from app.tests.evals.evaluation_metrics import score_response_quality
 from app.tests.evals.execution_metrics import build_execution_metrics
+from app.tests.evals.retrieval_metrics import evaluate_retrieval_quality
 from app.tests.evals.test_cases import TEST_CASES
 
 
@@ -48,12 +49,17 @@ def run_all_evals():
         result = ask_with_context(test_case["query"], test_case["step"])
         response = result.response
         execution_metrics = build_execution_metrics(result)
+        retrieval_metrics = evaluate_retrieval_quality(result.selected_chunks)
 
         print(f"RESPONSE:\n{response}")
         print("\nEXECUTION METRICS:")
         for key, value in execution_metrics.items():
             print(f"- {key}: {value}")
         
+        print("\nRETRIEVAL METRICS:")
+        for key, value in retrieval_metrics.items():
+            print(f"- {key}: {value}")
+
         evaluation = evaluate_response(
             test_case,
             response

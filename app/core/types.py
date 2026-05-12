@@ -140,3 +140,4 @@ class ExecutionResult(BaseModel):
     response_mode: str
     reasoning_issues: List[str]
     quality_score: int
+    selected_chunks: list

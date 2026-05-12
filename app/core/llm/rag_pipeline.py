@@ -134,6 +134,7 @@ def ask_with_context(query: str, step):
         operational_evidence = retrieval_context["operational_evidence"]
         retrieval_confidence = retrieval_context["retrieval_confidence"]
         lifecycle_timeline = retrieval_context["lifecycle_timeline"]
+        selected_chunks = retrieval_context["selected_chunks"]
 
         context = build_structured_context(
             context_chunks=distilled_chunks,
@@ -214,6 +215,7 @@ def ask_with_context(query: str, step):
             reasoning_issues=reasoning_issues,
             response_mode=response_mode,
             quality_score=quality_score,
+            selected_chunks=selected_chunks,
         )
     except Exception as e:
         logger.error(f"Error asking with context: {e}")
