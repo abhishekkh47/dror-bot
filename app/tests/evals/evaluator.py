@@ -1,5 +1,6 @@
 from app.core.llm.rag_pipeline import ask_with_context
 
+from app.tests.evals.evaluation_metrics import score_response_quality
 from app.tests.evals.test_cases import TEST_CASES
 
 
@@ -43,7 +44,9 @@ def run_all_evals():
     results = []
 
     for test_case in TEST_CASES:
-        response = ask_with_context(test_case["query"], test_case["step"])
+        result = ask_with_context(test_case["query"], test_case["step"])
+        response = result.response
+        quality_score = result.quality_score
 
         evaluation = evaluate_response(
             test_case,

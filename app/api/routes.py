@@ -23,11 +23,11 @@ def process_input(session_id: str, user_input: str):
     try:
         step = engine.process_input(session_id, user_input)
 
-        response = ask_with_context(
+        result = ask_with_context(
             query=user_input,
             step=step
         )
 
-        return { "step": step, "response": response }
+        return { "step": step, "response": result.response }
     except Exception as e:
         return { "error": str(e) }

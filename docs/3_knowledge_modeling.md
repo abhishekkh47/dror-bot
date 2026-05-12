@@ -10,6 +10,95 @@ This phase pauses all retrieval logic, prompt, eval, and sanitizer work. The fou
 
 ---
 
+## Step 4.17–4.18: Evaluation metrics + structured execution result contracts
+
+**Category:** Execution Infrastructure & Evaluation Hardening
+
+**What:** Two tightly coupled steps that transformed the pipeline from returning a plain string (`ask_with_context() -> str`) to returning a structured execution result (`ask_with_context() -> ExecutionResult`) containing response text, retrieval confidence, response mode, reasoning issues, and a quality score. This makes all pipeline telemetry into **first-class execution artifacts** instead of dead logging output.
+
+### Step 4.17: Response quality scoring
+
+**`app/tests/evals/evaluation_metrics.py`** — `score_response_quality(response, retrieval_confidence, reasoning_issues, response_mode)`:
+
+Deterministic quality scorer that produces a 0–100 score:
+
+| Signal | Penalty |
+|--------|---------|
+| Each reasoning contradiction | -20 |
+| Fallback response mode | -25 |
+| Clarification response mode | -10 |
+| Low retrieval confidence (< 0.40) | -15 |
+| Each hallucination pattern detected (`webhook failure`, `socket disconnected`, `database rollback failure`) | -15 |
+
+This is NOT AI quality estimation. It is **deterministic operational quality scoring** — rule-based, measurable, regression-trackable.
+
+### Step 4.18: Structured execution result contracts
+
+**The problem — dead telemetry:**
+
+The pipeline computed `retrieval_confidence`, `reasoning_issues`, `response_mode`, and `quality_score` but the function returned `str`. All telemetry was either logged-and-forgotten or computed-and-unused. Dead telemetry is useless. The system contract `ask_with_context() -> str` was fundamentally broken for an architecture that generates text, diagnostics, confidence, validation signals, and quality metrics.
+
+**What was built:**
+
+**`app/core/types.py`** — `ExecutionResult` added alongside existing `Step`, `Flow`, `Session` models:
+
+```python
+class ExecutionResult(BaseModel):
+    response: str
+    retrieval_confidence: float
+    response_mode: str
+    reasoning_issues: List[str]
+    quality_score: int
+```
+
+**Architectural decision — placement in `core/types.py`, not `rag/`:**
+
+`ExecutionResult` is an orchestration-wide contract used by `rag_pipeline`, eval system, telemetry, APIs, and analytics. It is NOT rag-specific. The placement rule:
+
+| Type | Location |
+|------|----------|
+| Retrieval-only model | `rag/` |
+| Orchestration-wide contract | `core/types.py` |
+| API response schema | `schemas/` |
+| Persistence model | `models/` |
+
+Placing it in `rag/` would create boundary inversion — `llm/` importing `rag/` importing `types` creates wrong dependency direction.
+
+**Pipeline integration:**
+
+`rag_pipeline.py` — `ask_with_context()` now returns `ExecutionResult` instead of `str`:
+- Fallback/clarification modes set the response string but still return the full result (not early-return strings)
+- `quality_score` is computed via `score_response_quality()` and included in the result
+- All telemetry becomes part of execution state
+
+**Eval system updated:**
+
+`evaluator.py` — `run_all_evals()` now unpacks `result.response` and `result.quality_score` from the execution result. The eval system can now track score trends, detect regressions, compare architecture versions, and measure hallucination severity — not just pass/fail phrase checks.
+
+**The architectural transition:**
+
+| Before | After |
+|--------|-------|
+| `ask_with_context() -> str` | `ask_with_context() -> ExecutionResult` |
+| Telemetry = logging output | Telemetry = first-class execution artifacts |
+| Quality score = unused variable | Quality score = part of execution contract |
+| Eval system checks phrases only | Eval system has access to confidence, mode, quality |
+
+This is the transition from **chatbot orchestration** to **execution-oriented AI infrastructure**.
+
+**What `ExecutionResult` will eventually expand into:**
+- `trace_id`, `latency`, `retrieval_trace`, `fallback_reason`, `evaluation_metrics`
+- Each becomes core execution infrastructure, not debug information
+
+**What this step did NOT change:**
+- No retrieval changes, no prompt changes, no model changes
+- Quality score weights are not tuned — infrastructure first, tuning later
+- `ExecutionResult` is minimal — will grow as execution observability needs grow
+
+**Next step:** Continued evaluation infrastructure hardening — benchmark suites, contradiction scoring trends, retrieval quality metrics, hallucination regression detection, automated evaluation pipelines. The architecture is mature enough that systematic proof of reliability becomes the next frontier.
+
+---
+
 ## Step 4.16: Operational escalation & fallback handling
 
 **Category:** Adaptive Uncertainty Management

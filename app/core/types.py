@@ -133,3 +133,10 @@ class Session(BaseModel):
     flow_id: str
     current_step: str
     history: List[str]
+
+class ExecutionResult(BaseModel):
+    response: str
+    retrieval_confidence: float
+    response_mode: str
+    reasoning_issues: List[str]
+    quality_score: int

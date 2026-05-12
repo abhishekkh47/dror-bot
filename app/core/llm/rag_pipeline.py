@@ -9,6 +9,8 @@ from app.core.rag.response_governance import build_response_constraints
 from app.core.rag.retrieval_debugger import print_retrieval_trace
 from app.core.rag.retrieval_metadata import get_capability, get_lifecycle_stage
 from app.core.rag.retrieval_pipeline import build_retrieval_context
+from app.core.types import ExecutionResult
+from app.tests.evals.evaluation_metrics import score_response_quality
 from app.utils.patterns import RESPONSE_PATTERNS, CONTRADICTION_PATTERNS, CLEANUP_PATTERNS, INTERNAL_PATTERNS
 from app.utils.logger import logger
 import re
@@ -198,7 +200,21 @@ def ask_with_context(query: str, step):
                 "be required to determine the exact "
                 "payment failure reason."
             )
-        return response
+        
+        quality_score = score_response_quality(
+            response=response,
+            retrieval_confidence=retrieval_confidence,
+            reasoning_issues=reasoning_issues,
+            response_mode=response_mode,
+        )
+
+        return ExecutionResult(
+            response=response,
+            retrieval_confidence=retrieval_confidence,
+            reasoning_issues=reasoning_issues,
+            response_mode=response_mode,
+            quality_score=quality_score,
+        )
     except Exception as e:
         logger.error(f"Error asking with context: {e}")
         return f"An error occurred while processing your request: {e}. Please try again later."
