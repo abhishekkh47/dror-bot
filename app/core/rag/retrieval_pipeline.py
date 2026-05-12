@@ -1,6 +1,7 @@
 from app.core.llm.chunk_selector import select_relevant_chunks
 from app.core.llm.operational_distiller import distill_chunks
 from app.core.llm.operational_evidence import build_operational_evidence
+from app.core.rag.ambiguity_detection import detect_operational_ambiguity
 from app.core.rag.evidence_attribution import build_evidence_attribution
 from app.core.rag.evidence_conflicts import detect_operational_conflicts
 from app.core.rag.lifecycle_chunk_selector import select_lifecycle_chunks
@@ -281,6 +282,11 @@ def process_retrieved_chunks(
         lifecycle_facts=lifecycle_facts,
         operational_evidence=operational_evidence,
     )
+    
+    operational_ambiguities = detect_operational_ambiguity(
+        operational_evidence=operational_evidence,
+        operational_conflicts=operational_conflicts,
+    )
 
     evidence_attribution = build_evidence_attribution(
         selected_chunks=selected_chunks,
@@ -311,4 +317,5 @@ def process_retrieved_chunks(
         "operational_conflicts": operational_conflicts,
         "evidence_attribution": evidence_attribution,
         "reasoning_breakdown": reasoning_breakdown,
+        "operational_ambiguities": operational_ambiguities,
     }

@@ -153,3 +153,4 @@ class ExecutionResult(BaseModel):
     response_reliability_score: int = 100
     evidence_attribution: dict = {}
     reasoning_breakdown: dict = {}
+    operational_ambiguities: list[str] = []

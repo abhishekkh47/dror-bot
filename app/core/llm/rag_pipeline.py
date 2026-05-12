@@ -147,6 +147,7 @@ def ask_with_context(query: str, step):
                 response_reliability_score=100,
                 evidence_attribution={},
                 reasoning_breakdown={},
+                operational_ambiguities=[],
             )
         
         retrieval_trace = retrieval_context["retrieval_trace"]
@@ -160,6 +161,7 @@ def ask_with_context(query: str, step):
         selected_chunks = retrieval_context["selected_chunks"]
         evidence_attribution = retrieval_context.get("evidence_attribution",{})
         reasoning_breakdown = retrieval_context.get("reasoning_breakdown",{})
+        operational_ambiguities = retrieval_context.get("operational_ambiguities",[])
         retry_attempted = retrieval_context.get(
             "retry_attempted",
             False
@@ -208,6 +210,7 @@ def ask_with_context(query: str, step):
             lifecycle_coherence_score=lifecycle_coherence_score,
             retrieval_stability_score=retrieval_stability_score,
             operational_conflicts=operational_conflicts,
+            operational_ambiguities=operational_ambiguities,
         )
 
         lifecycle_drift_issues = detect_lifecycle_drift(
@@ -325,6 +328,7 @@ def ask_with_context(query: str, step):
             response_reliability_score=response_reliability_score,
             evidence_attribution=evidence_attribution,
             reasoning_breakdown=reasoning_breakdown,
+            operational_ambiguities=operational_ambiguities,
         )
     except Exception as e:
         logger.error(f"Error asking with context: {e}")
@@ -347,4 +351,5 @@ def ask_with_context(query: str, step):
             response_reliability_score=100,
             evidence_attribution={},
             reasoning_breakdown={},
+            operational_ambiguities=[],
         )

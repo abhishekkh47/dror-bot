@@ -3,6 +3,7 @@ def compute_response_reliability(
     lifecycle_coherence_score,
     retrieval_stability_score,
     operational_conflicts,
+    operational_ambiguities
 ):
     """
     Compute overall response reliability.
@@ -30,6 +31,11 @@ def compute_response_reliability(
     # Operational conflicts
     score -= (
         len(operational_conflicts) * 15
+    )
+
+    # Operational ambiguities
+    score -= (
+        len(operational_ambiguities) * 10
     )
 
     return max(score, 0)

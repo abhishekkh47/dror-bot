@@ -816,3 +816,62 @@ Two output categories:
 - Inference rules are minimal — will expand as more lifecycle patterns are observed
 
 **Next step:** Step 4.32 — Operational Ambiguity Detection. The system still does not explicitly detect insufficient evidence, multiple plausible explanations, unresolved operational ambiguity, or equally likely failure causes. That becomes the next major enterprise trustworthiness frontier: ambiguity-aware reasoning governance.
+
+---
+
+## Step 4.32: Operational ambiguity detection
+
+**Category:** Uncertainty & Ambiguity Governance
+
+**What:** Introduced ambiguity detection that identifies when retrieved evidence supports multiple plausible operational explanations without enough evidence to determine the primary root cause. This is fundamentally different from conflict detection (Step 4.28) — conflicts mean evidence contradicts; ambiguity means evidence supports multiple valid interpretations.
+
+**The critical distinction:**
+
+| State | Meaning | Example |
+|-------|---------|---------|
+| **Conflict** | Evidence contradicts itself | `completed` + `transaction_cancelled` |
+| **Ambiguity** | Multiple plausible explanations coexist | `authentication issue` + `processing timeout` both present |
+
+Without ambiguity governance, systems overcommit, hallucinate root causes, provide premature troubleshooting, and sound more certain than justified — dangerous in payment/compliance workflows.
+
+**Key principle:** Reliable systems should acknowledge uncertainty explicitly, not hide ambiguity behind confident wording. Ambiguity handling should **calibrate certainty**, not destroy usefulness.
+
+**What was built:**
+
+**`app/core/rag/ambiguity_detection.py`** — `detect_operational_ambiguity(operational_evidence, operational_conflicts)`:
+
+- Returns empty if operational conflicts already exist (conflicts take priority — different failure mode)
+- Scans operational evidence text for co-occurring ambiguous pattern pairs:
+
+| Pattern A | Pattern B | Ambiguity |
+|-----------|-----------|-----------|
+| authentication | processing | Unclear whether auth issue or processing failure |
+| timeout | cancellation | Unclear whether timeout caused cancellation or vice versa |
+| network | processing | Unclear whether network issue or processing failure |
+
+- Returns list of ambiguity descriptions
+
+**Pipeline and reliability integration:**
+- `retrieval_pipeline.py` — detects ambiguities inside `process_retrieved_chunks()` after conflict detection, includes in return dict
+- `response_reliability.py` — `compute_response_reliability()` now penalizes ambiguities (-10 per ambiguity), in addition to existing confidence/coherence/stability/conflict penalties
+- `rag_pipeline.py` — extracts `operational_ambiguities`, feeds into reliability scoring
+- `ExecutionResult` — expanded with `operational_ambiguities: list[str] = []`
+
+**Updated reliability scoring (5 signals):**
+
+| Signal | Max penalty | Step |
+|--------|-------------|------|
+| Low retrieval confidence | -40 | 4.29 |
+| Weak lifecycle coherence | -25 | 4.29 |
+| Low retrieval stability | -20 | 4.29 |
+| Operational conflicts | -15 per conflict | 4.29 |
+| **Operational ambiguities** | **-10 per ambiguity** | **4.32** |
+
+Ambiguity penalty is lighter than conflict penalty — ambiguity reduces certainty, conflict invalidates reasoning.
+
+**What this step did NOT change:**
+- No retrieval logic changes, no prompt changes
+- Ambiguity does not yet trigger specific response behavior (e.g., "multiple possible causes detected") — it feeds into reliability scoring which governs response mode
+- Ambiguous patterns are minimal — will expand as more operational scenarios are observed
+
+**Important — do NOT over-suppress on ambiguity:** Ambiguity handling should calibrate certainty, not force "I don't know" excessively or suppress useful troubleshooting. Some ambiguity is normal in operational support — the system should communicate uncertainty, not refuse to help.
