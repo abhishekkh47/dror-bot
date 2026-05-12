@@ -136,6 +136,13 @@ def ask_with_context(query: str, step):
                 selected_chunks=[],
                 lifecycle_drift_issues=[],
                 retrieval_recovery_eligible=False,
+                retry_attempted=False,
+                initial_retrieval_confidence=0.0,
+                final_retrieval_confidence=0.0,
+                retry_confidence_delta=0.0,
+                retrieval_stability_score=100,
+                lifecycle_coherence_score=0,
+                operational_conflicts=[],
             )
         
         retrieval_trace = retrieval_context["retrieval_trace"]
@@ -181,6 +188,13 @@ def ask_with_context(query: str, step):
             retrieval_context.get(
                 "lifecycle_coherence_score",
                 0,
+            )
+        )
+
+        operational_conflicts = (
+            retrieval_context.get(
+                "operational_conflicts",
+                [],
             )
         )
 
@@ -239,6 +253,9 @@ def ask_with_context(query: str, step):
         # reasoning_issues.extend(
         #     lifecycle_drift_issues
         # )
+        reasoning_issues.extend(
+            operational_conflicts
+        )
         
         retrieval_recovery_eligible = (
             should_retry_retrieval(
@@ -291,6 +308,7 @@ def ask_with_context(query: str, step):
             retry_confidence_delta=retry_confidence_delta,
             retrieval_stability_score=retrieval_stability_score,
             lifecycle_coherence_score=lifecycle_coherence_score,
+            operational_conflicts=operational_conflicts,
         )
     except Exception as e:
         logger.error(f"Error asking with context: {e}")
@@ -303,4 +321,11 @@ def ask_with_context(query: str, step):
             selected_chunks=[],
             lifecycle_drift_issues=[],
             retrieval_recovery_eligible=False,
+            retry_attempted=False,
+            initial_retrieval_confidence=0.0,
+            final_retrieval_confidence=0.0,
+            retry_confidence_delta=0.0,
+            retrieval_stability_score=100,
+            lifecycle_coherence_score=0,
+            operational_conflicts=[],
         )

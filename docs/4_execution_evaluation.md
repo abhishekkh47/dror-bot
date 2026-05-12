@@ -534,3 +534,58 @@ Previously the system could tell you: "retrieval is confident, stable, and non-c
 - Coherence score is not yet used to gate generation or trigger retries
 
 **Next step:** Step 4.28 — Operational Evidence Conflict Detection. The system still does not explicitly detect conflicting operational claims, mutually incompatible evidence, contradictory failure causes, or impossible operational combinations. That becomes the next major reasoning integrity frontier: evidence conflict governance.
+
+---
+
+## Step 4.28: Operational evidence conflict detection
+
+**Category:** Operational Reasoning Integrity
+
+**What:** Added explicit detection of operationally incompatible evidence — mutually exclusive lifecycle states, contradictory outcomes, and impossible transaction state combinations. This is a different layer from chronology drift (Step 4.21, retrieval-level) and reasoning validation (Step 4.14, response-level). Evidence conflicts are **operational compatibility violations** — individually valid evidence that is collectively impossible.
+
+**The problem — compatible evidence != compatible operations:**
+
+Retrieved evidence may be individually valid, chronologically coherent, high-confidence, and stable — yet still form impossible operational states. Example: evidence simultaneously suggesting `payment completed`, `transaction cancelled`, `authentication required`, and `processing never started` are all individually plausible chunks, but together they describe an impossible transaction. This creates misleading support guidance, contradictory root-cause explanations, and unstable troubleshooting behavior.
+
+**Key principle:** Operational reasoning quality depends on **evidence compatibility**, not merely evidence coherence. Coherence checks chronology ordering. Compatibility checks operational possibility.
+
+**What was built:**
+
+**`app/core/rag/evidence_conflicts.py`** — `detect_operational_conflicts(lifecycle_facts, operational_evidence)`:
+
+Conflict detection from two sources:
+
+1. **Lifecycle facts** → detected states (`processing_started`, `transaction_cancelled`, `final_state`)
+2. **Operational evidence text** → inferred states (e.g., "authentication" keyword → `authentication_required`)
+
+Checked against conflict rules:
+
+| State A | State B | Why impossible |
+|---------|---------|---------------|
+| `completed` | `transaction_cancelled` | Completed transactions cannot be cancelled |
+| `processing_started` | `processing_never_started` | Mutually exclusive states |
+| `authentication_required` | `completed` | Cannot complete if auth is still required |
+
+Returns list of conflict descriptions.
+
+**Pipeline integration:**
+- `retrieval_pipeline.py` — detects conflicts inside `process_retrieved_chunks()` after building operational evidence, includes in return dict
+- `rag_pipeline.py` — extracts `operational_conflicts`, merges them into `reasoning_issues` (operational conflicts ARE reasoning integrity violations)
+- `ExecutionResult` — expanded with `operational_conflicts: list[str] = []`
+
+**Important distinction — three validation layers at different levels:**
+
+| Layer | What it validates | Architectural level |
+|-------|-------------------|-------------------|
+| Lifecycle drift (4.21) | Retrieval evidence chronology consistency | Retrieval integrity |
+| Evidence conflicts (4.28) | Operational state compatibility | Operational integrity |
+| Reasoning validation (4.14) | Generated response consistency | Response integrity |
+
+Drift = "does evidence form valid chronology?" Conflicts = "are operational claims mutually possible?" Reasoning = "did the model reason correctly from evidence?"
+
+**What this step did NOT change:**
+- No retrieval logic changes — conflicts are detected, not corrected
+- Conflict rules are minimal (3 rules) — focus on high-signal contradictions and obvious operational impossibilities
+- Conflicts feed into reasoning issues and `ExecutionResult` but don't yet trigger response downgrading or retries
+
+**Next step:** Step 4.29 — Adaptive Response Downgrading. The system still does not automatically reduce answer certainty, troubleshooting specificity, or causal confidence when evidence conflicts exist, coherence is weak, or retrieval stability is low. That becomes the next major trustworthiness frontier: response reliability adaptation.
