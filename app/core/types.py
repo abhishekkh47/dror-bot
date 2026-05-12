@@ -142,4 +142,4 @@ class ExecutionResult(BaseModel):
     quality_score: int
     selected_chunks: list
     lifecycle_drift_issues: list[str]
-    retrieval_recovery_triggered: bool
+    retrieval_recovery_eligible: bool

@@ -18,3 +18,4 @@ class RetrievalStage(str, Enum):
     LIFECYCLE_SELECTION = "lifecycle_selection"
     LLM_SELECTION = "llm_selection"
     DISTILLATION = "distillation"
+    RETRIEVAL_VALIDATION = "retrieval_validation"

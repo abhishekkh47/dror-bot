@@ -4,6 +4,7 @@ from app.core.llm.operational_evidence import build_operational_evidence
 from app.core.rag.lifecycle_chunk_selector import select_lifecycle_chunks
 from app.core.rag.retrieval_confidence import compute_retrieval_confidence
 from app.core.rag.retrieval_diagnostics import RetrievalDiagnostic, RetrievalStage
+from app.core.rag.retrieval_recovery import apply_recovery_strategy, build_recovery_strategy, should_retry_retrieval
 from app.core.rag.retrieval_rules import is_noise_chunk
 from app.core.llm.lifecycle_extractor import extract_lifecycle_facts
 from app.core.rag.retrieval_filtering import apply_structured_filters
@@ -18,38 +19,130 @@ def build_retrieval_context(
 ):
     """
     Centralized retrieval orchestration layer.
-    Responsibility: high-level retrieval orchestration
+    Responsibility:
+    - vector retrieval
+    - adaptive retrieval retry
+    - retrieval orchestration
+    """
+
+    retrieval_options = {
+        "top_k": 8,
+        "similarity_threshold": 0.70,
+    }
+
+    # Initial retrieval
+    scored_chunks = store.search(
+        query,
+        step,
+        top_k=retrieval_options["top_k"]
+    )
+
+    diagnostic = RetrievalDiagnostic(
+        chunk_counts={
+            "vector_search": len(scored_chunks)
+        }
+    )
+
+    if not scored_chunks:
+        diagnostic.failed_stage = RetrievalStage.VECTOR_SEARCH
+        diagnostic.reason = "Vector search returned no chunks"
+        return { "diagnostic": diagnostic }
+
+    # Initial retrieval processing
+    retrieval_context = (
+        process_retrieved_chunks(
+            retrieved_chunks=scored_chunks,
+            query=query,
+            step=step,
+        )
+    )
+
+    retrieval_confidence = (
+        retrieval_context.get(
+            "retrieval_confidence",
+            0.0
+        )
+    )
+
+    # Adaptive retrieval recovery
+    retrieval_recovery_eligible = (
+        should_retry_retrieval(
+            retrieval_confidence=
+                retrieval_confidence,
+
+            lifecycle_drift_issues=[],
+        )
+    )
+
+    # Controlled single retry
+    if retrieval_recovery_eligible:
+        recovery_strategy = (
+            build_recovery_strategy()
+        )
+        retrieval_options = (
+            apply_recovery_strategy(
+                retrieval_options,
+                recovery_strategy,
+            )
+        )
+        retry_chunks = store.search(
+            query,
+            step,
+            top_k=retrieval_options["top_k"]
+        )
+        retry_context = (
+            process_retrieved_chunks(
+                retrieved_chunks=retry_chunks,
+                query=query,
+                step=step,
+            )
+        )
+        retry_confidence = (
+            retry_context.get(
+                "retrieval_confidence",
+                0.0
+            )
+        )
+        # Keep better retrieval result
+        if retry_confidence > retrieval_confidence:
+            retrieval_context = retry_context
+
+    return retrieval_context
+
+def process_retrieved_chunks(
+    retrieved_chunks,
+    query,
+    step,
+):
+    """
+    Process retrieved chunks through
+    filtering, selection, validation,
+    distillation, and lifecycle extraction.
     """
 
     diagnostic = RetrievalDiagnostic(
         chunk_counts={}
     )
-    # Vector retrieval
-    scored_chunks = store.search(
-        query,
-        step,
-        top_k=8
-    )
-    diagnostic.chunk_counts["vector_search"] = len(scored_chunks)
-
-    if not scored_chunks:
-        diagnostic.failed_stage = RetrievalStage.VECTOR_SEARCH
-        diagnostic.reason = "Vector search returned no chunks"
-        return {
-            "diagnostic": diagnostic
-        }
 
     # Structured filtering
     candidate_chunks, retrieval_trace = (
         apply_structured_filters(
-            retrieved_chunks=scored_chunks,
+            retrieved_chunks=retrieved_chunks,
             step=step
         )
     )
-    diagnostic.chunk_counts["structured_filtering"] = len(candidate_chunks)
+
+    diagnostic.chunk_counts[
+        "structured_filtering"
+    ] = len(candidate_chunks)
+
     if not candidate_chunks:
-        diagnostic.failed_stage = RetrievalStage.STRUCTURED_FILTERING
-        diagnostic.reason = "All chunks removed during structured filtering"
+        diagnostic.failed_stage = (
+            RetrievalStage.STRUCTURED_FILTERING
+        )
+        diagnostic.reason = (
+            "All chunks removed during filtering"
+        )
         return {
             "diagnostic": diagnostic
         }
@@ -60,47 +153,74 @@ def build_retrieval_context(
         for score, chunk in candidate_chunks
         if not is_noise_chunk(chunk)
     ]
-    diagnostic.chunk_counts["noise_suppression"] = len(candidate_chunks)
 
-    # Fallback
+    diagnostic.chunk_counts[
+        "noise_suppression"
+    ] = len(candidate_chunks)
+
     if not candidate_chunks:
-        diagnostic.failed_stage = RetrievalStage.NOISE_SUPPRESSION
-        diagnostic.reason = "All chunks removed after noise suppression"
+        diagnostic.failed_stage = (
+            RetrievalStage.NOISE_SUPPRESSION
+        )
+        diagnostic.reason = (
+            "All chunks removed during noise suppression"
+        )
         return {
             "diagnostic": diagnostic
         }
 
-    # initial Lifecycle extraction
+    # Initial lifecycle extraction
     lifecycle_facts = extract_lifecycle_facts(
         candidate_chunks
     )
 
-    # Lifecycle chunk selector
+    # Lifecycle selection
     selected_chunks = select_lifecycle_chunks(
         filtered_chunks=candidate_chunks,
         lifecycle_facts=lifecycle_facts,
     )
-    diagnostic.chunk_counts["lifecycle_selection"] = len(selected_chunks)
+    if not selected_chunks:
+        diagnostic.failed_stage = (
+            RetrievalStage.LIFECYCLE_SELECTION
+        )
+        diagnostic.reason = (
+            "All chunks removed during lifecycle selection"
+        )
+        return {
+            "diagnostic": diagnostic
+        }
 
-    # LLM chunk selector
+    diagnostic.chunk_counts[
+        "lifecycle_selection"
+    ] = len(selected_chunks)
+
+    # LLM chunk selection
     selected_chunks = select_relevant_chunks(
         query,
         selected_chunks
     )
-    diagnostic.chunk_counts["llm_selection"] = len(selected_chunks)
+
+    diagnostic.chunk_counts[
+        "llm_selection"
+    ] = len(selected_chunks)
 
     if not selected_chunks:
-        diagnostic.failed_stage = RetrievalStage.LLM_SELECTION
-        diagnostic.reason = "All chunks removed by select_relevant_chunks"
+        diagnostic.failed_stage = (
+            RetrievalStage.LLM_SELECTION
+        )
+        diagnostic.reason = (
+            "All chunks removed during LLM selection"
+        )
         return {
             "diagnostic": diagnostic
         }
-    
-    # Final lifecycle grounding
+
+    # Final lifecycle extraction
     lifecycle_facts = extract_lifecycle_facts(
         selected_chunks
     )
-    
+
+    # Validation
     is_valid, validation_reason = (
         validate_retrieval_quality(
             selected_chunks=selected_chunks,
@@ -110,7 +230,7 @@ def build_retrieval_context(
 
     if not is_valid:
         diagnostic.failed_stage = (
-            "retrieval_validation"
+            RetrievalStage.RETRIEVAL_VALIDATION
         )
 
         diagnostic.reason = validation_reason
@@ -118,7 +238,8 @@ def build_retrieval_context(
         return {
             "diagnostic": diagnostic
         }
-    
+
+    # Confidence
     retrieval_confidence = (
         compute_retrieval_confidence(
             selected_chunks=selected_chunks,
@@ -130,7 +251,6 @@ def build_retrieval_context(
     distilled_chunks = distill_chunks(
         selected_chunks
     )
-    diagnostic.chunk_counts["distillation"] = len(distilled_chunks)
 
     # Operational evidence
     operational_evidence = (
@@ -139,7 +259,7 @@ def build_retrieval_context(
         )
     )
 
-    # Lifecycle timeline
+    # Timeline
     lifecycle_timeline = (
         build_lifecycle_timeline(
             lifecycle_facts

@@ -1,4 +1,4 @@
-from app.core.llm.retriever import retrieve_context
+from app.core.llm.retriever import retrieve_context, store
 from app.core.llm.prompt import build_prompt, build_prompt_with_step
 from app.core.llm.llm import generate_response
 from app.core.rag.confidence_policy import build_confidence_policy
@@ -10,7 +10,7 @@ from app.core.rag.response_governance import build_response_constraints
 from app.core.rag.retrieval_debugger import print_retrieval_trace
 from app.core.rag.retrieval_metadata import get_capability, get_lifecycle_stage
 from app.core.rag.retrieval_pipeline import build_retrieval_context
-from app.core.rag.retrieval_recovery import build_recovery_strategy, should_retry_retrieval
+from app.core.rag.retrieval_recovery import should_retry_retrieval
 from app.core.types import ExecutionResult
 from app.tests.evals.evaluation_metrics import score_response_quality
 from app.utils.patterns import RESPONSE_PATTERNS, CONTRADICTION_PATTERNS, CLEANUP_PATTERNS, INTERNAL_PATTERNS
@@ -123,9 +123,19 @@ def ask_with_context(query: str, step):
         diagnostic = retrieval_context.get("diagnostic")
         # TEMP DEVELOPMENT RESPONSE
         if diagnostic and diagnostic.failed_stage:
-            return (
+            response = (
                 f"No relevant context found. "
                 f"Failed at: {diagnostic.failed_stage}"
+            )
+            return ExecutionResult(
+                response=response,
+                retrieval_confidence=0.0,
+                reasoning_issues=[],
+                response_mode="fallback",
+                quality_score=0,
+                selected_chunks=[],
+                lifecycle_drift_issues=[],
+                retrieval_recovery_eligible=False,
             )
         
         retrieval_trace = retrieval_context["retrieval_trace"]
@@ -137,6 +147,11 @@ def ask_with_context(query: str, step):
         retrieval_confidence = retrieval_context["retrieval_confidence"]
         lifecycle_timeline = retrieval_context["lifecycle_timeline"]
         selected_chunks = retrieval_context["selected_chunks"]
+
+        lifecycle_drift_issues = detect_lifecycle_drift(
+            lifecycle_facts=lifecycle_facts,
+            selected_chunks=selected_chunks,
+        )
 
         context = build_structured_context(
             context_chunks=distilled_chunks,
@@ -185,11 +200,11 @@ def ask_with_context(query: str, step):
                 }
             )
         
-        reasoning_issues.extend(
-            lifecycle_drift_issues
-        )
+        # reasoning_issues.extend(
+        #     lifecycle_drift_issues
+        # )
         
-        retrieval_recovery_triggered = (
+        retrieval_recovery_eligible = (
             should_retry_retrieval(
                 retrieval_confidence=
                     retrieval_confidence,
@@ -197,16 +212,6 @@ def ask_with_context(query: str, step):
                 lifecycle_drift_issues=
                     lifecycle_drift_issues,
             )
-        )
-        recovery_strategy = None
-        if retrieval_recovery_triggered:
-            recovery_strategy = (
-                build_recovery_strategy()
-            )
-
-        lifecycle_drift_issues = detect_lifecycle_drift(
-            lifecycle_facts=lifecycle_facts,
-            selected_chunks=selected_chunks,
         )
         
         response_mode = determine_response_mode(
@@ -216,13 +221,13 @@ def ask_with_context(query: str, step):
 
         response = sanitize_response(response)
         if response_mode == "fallback":
-            return (
+            response = (
                 "The available operational evidence "
                 "is insufficient to reliably determine "
                 "the payment failure cause."
             )
         if response_mode == "clarification":
-            return (
+            response = (
                 "Additional operational details may "
                 "be required to determine the exact "
                 "payment failure reason."
@@ -243,8 +248,17 @@ def ask_with_context(query: str, step):
             quality_score=quality_score,
             selected_chunks=selected_chunks,
             lifecycle_drift_issues=lifecycle_drift_issues,
-            retrieval_recovery_triggered=retrieval_recovery_triggered,
+            retrieval_recovery_eligible=retrieval_recovery_eligible,
         )
     except Exception as e:
         logger.error(f"Error asking with context: {e}")
-        return f"An error occurred while processing your request: {e}. Please try again later."
+        return ExecutionResult(
+            response="An internal processing error occurred.",
+            retrieval_confidence=0.0,
+            reasoning_issues=[],
+            response_mode="fallback",
+            quality_score=0,
+            selected_chunks=[],
+            lifecycle_drift_issues=[],
+            retrieval_recovery_eligible=False,
+        )

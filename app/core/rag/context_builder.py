@@ -1,4 +1,5 @@
 from app.core.rag.retrieval_metadata import get_capability, get_lifecycle_stage, get_knowledge_type
+INCLUDE_TRANSPORT_CONTEXT = False
 
 def build_structured_context(context_chunks, operational_evidence, lifecycle_timeline):
     """
@@ -84,7 +85,7 @@ TROUBLESHOOTING_CONTEXT:
 {chr(10).join(troubleshooting_sections)}
 """.strip())
 
-    if transport_sections:
+    if transport_sections and INCLUDE_TRANSPORT_CONTEXT:
         sections.append(f"""
 TRANSPORT_CONTEXT:
 

@@ -249,7 +249,7 @@ The system can detect low confidence, weak coverage, lifecycle drift, and reason
 
 **Pipeline integration:**
 - `rag_pipeline.py` — after lifecycle drift detection and reasoning issue merging, calls `should_retry_retrieval()` and conditionally builds `recovery_strategy`
-- `ExecutionResult` — expanded with `retrieval_recovery_triggered: bool` to expose whether recovery was warranted
+- `ExecutionResult` — expanded with `retrieval_recovery_eligible: bool` to expose whether recovery was warranted
 
 **What this changes architecturally:**
 
