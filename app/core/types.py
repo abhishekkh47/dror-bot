@@ -151,3 +151,4 @@ class ExecutionResult(BaseModel):
     lifecycle_coherence_score: int = 0
     operational_conflicts: list[str] = []
     response_reliability_score: int = 100
+    evidence_attribution: dict = {}

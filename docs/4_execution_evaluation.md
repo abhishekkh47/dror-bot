@@ -655,3 +655,91 @@ High retrieval confidence can coexist with operational conflicts, weak coherence
 - Response downgrading is mode-based (normal/cautious/clarification/fallback) — not yet fine-grained within modes
 
 **Next step:** Step 4.30 — Retrieval Evidence Attribution & Source Traceability. Responses still do not explicitly expose which evidence supported which claim, which lifecycle facts were grounded, which operational conclusions were inferred, and which retrieval evidence justified the response. That becomes the next major enterprise trustworthiness frontier: explainable operational reasoning.
+
+---
+
+## Step 4.30: Retrieval evidence attribution & source traceability
+
+**Category:** Explainable Operational Reasoning
+
+**What:** Introduced evidence attribution infrastructure that tracks which chunks supported reasoning, which lifecycle facts were grounded from evidence, and which chunk IDs influenced conclusions. Responses are no longer operationally opaque — the system can now explain what evidence justified its answer.
+
+**The problem — opaque operational reasoning:**
+
+The system produces "The payment processing failed during auto-completion" but neither users, support engineers, nor debugging systems can see: what evidence supported that, which lifecycle facts were grounded, whether the answer was inferred or directly supported, or which chunks influenced the conclusion. This creates low auditability, weak trust, difficult debugging, and poor enterprise explainability.
+
+**Key principle:** Enterprise AI systems require **evidence traceability**, not merely good answers. Trustworthy AI must answer: "Why did the model say this?" and "Which evidence supported this conclusion?"
+
+**What was built:**
+
+**`app/core/rag/evidence_attribution.py`** — `build_evidence_attribution(selected_chunks, lifecycle_facts)`:
+
+Builds an attribution record with three dimensions:
+
+| Field | What it tracks |
+|-------|---------------|
+| `supporting_topics` | Unique metadata topics from selected chunks |
+| `grounded_lifecycle_facts` | Which lifecycle facts (`intent_created`, `processing_started`, `processing_failed`, `transaction_cancelled`) were confirmed from evidence |
+| `evidence_chunk_ids` | IDs of all chunks that participated in reasoning |
+
+**Example attribution output:**
+```json
+{
+  "supporting_topics": ["auto_completion", "cancellation"],
+  "grounded_lifecycle_facts": ["intent_created", "processing_started", "processing_failed", "transaction_cancelled"],
+  "evidence_chunk_ids": ["chunk-001", "chunk-007", "chunk-012"]
+}
+```
+
+**Pipeline integration:**
+- `retrieval_pipeline.py` — builds attribution inside `process_retrieved_chunks()` after operational evidence and conflict detection, includes in return dict
+- `rag_pipeline.py` — extracts `evidence_attribution` from retrieval context
+- `ExecutionResult` — expanded with `evidence_attribution: dict = {}`
+- `run_eval.py` — optionally displays attribution for debugging and retrieval audits
+
+**What this enables:**
+
+| Use case | How attribution helps |
+|----------|----------------------|
+| Hallucination debugging | Check if conclusion chunk IDs actually contain supporting evidence |
+| Retrieval audits | Verify which topics contributed to the answer |
+| Lifecycle grounding verification | Confirm which facts were evidence-based vs inferred |
+| Support engineer trust | Show what the system relied on |
+| Regression analysis | Track whether attribution patterns change after architecture changes |
+
+**Important design decision — operationally practical, not research-grade:**
+
+This is NOT token-level attribution, attention visualization, SHAP-like reasoning maps, or neural explainability. It is **operational evidence provenance** — which chunks, which topics, which lifecycle facts. Practical for debugging and auditing, not for research papers.
+
+**Important — internal telemetry, not user-facing:** Attribution is currently internal operational telemetry. Raw chunk IDs should NOT be exposed to end users yet. User-facing explainability UI is a future layer.
+
+**What this step did NOT change:**
+- No retrieval logic changes, no prompt changes
+- Attribution does not yet distinguish between directly grounded facts and inferred conclusions (that is Step 4.31)
+- Attribution is passive — recorded but not used to influence generation behavior
+
+**The full `ExecutionResult` contract after Phase 4:**
+
+| Field | Category | Step |
+|-------|----------|------|
+| `response` | Output | — |
+| `retrieval_confidence` | Evidence strength | 4.10 |
+| `response_mode` | Behavior | 4.16 |
+| `reasoning_issues` | Reasoning integrity | 4.14 |
+| `quality_score` | Quality | 4.17 |
+| `selected_chunks` | Retrieval state | 4.20 |
+| `lifecycle_drift_issues` | Chronology integrity | 4.21 |
+| `retrieval_recovery_eligible` | Adaptive retrieval | 4.22 |
+| `retry_attempted` | Retry telemetry | 4.24 |
+| `initial_retrieval_confidence` | Retry telemetry | 4.24 |
+| `final_retrieval_confidence` | Retry telemetry | 4.24 |
+| `retry_confidence_delta` | Retry telemetry | 4.24 |
+| `retrieval_stability_score` | Stability | 4.26 |
+| `lifecycle_coherence_score` | Narrative integrity | 4.27 |
+| `operational_conflicts` | Operational compatibility | 4.28 |
+| `response_reliability_score` | Composite reliability | 4.29 |
+| `evidence_attribution` | Explainability | 4.30 |
+
+This is no longer a chatbot return value. It is an **operational AI execution artifact**.
+
+**Next step:** Step 4.31 — Inference vs Grounded-Fact Separation. Responses still do not explicitly distinguish directly grounded facts from inferred operational conclusions. That becomes the next major enterprise trust frontier: reasoning transparency governance.

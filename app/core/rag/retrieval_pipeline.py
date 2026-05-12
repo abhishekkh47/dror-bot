@@ -1,6 +1,7 @@
 from app.core.llm.chunk_selector import select_relevant_chunks
 from app.core.llm.operational_distiller import distill_chunks
 from app.core.llm.operational_evidence import build_operational_evidence
+from app.core.rag.evidence_attribution import build_evidence_attribution
 from app.core.rag.evidence_conflicts import detect_operational_conflicts
 from app.core.rag.lifecycle_chunk_selector import select_lifecycle_chunks
 from app.core.rag.lifecycle_coherence import score_lifecycle_coherence
@@ -280,6 +281,11 @@ def process_retrieved_chunks(
         operational_evidence=operational_evidence,
     )
 
+    evidence_attribution = build_evidence_attribution(
+        selected_chunks=selected_chunks,
+        lifecycle_facts=lifecycle_facts,
+    )
+
     # Timeline
     lifecycle_timeline = build_lifecycle_timeline(lifecycle_facts)
 
@@ -297,4 +303,5 @@ def process_retrieved_chunks(
         "lifecycle_timeline": lifecycle_timeline,
         "lifecycle_coherence_score": lifecycle_coherence_score,
         "operational_conflicts": operational_conflicts,
+        "evidence_attribution": evidence_attribution,
     }

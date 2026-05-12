@@ -17,6 +17,9 @@ for result in results:
     print("\nRESPONSE:")
     print(result["response"])
 
+    print("\nEVIDENCE ATTRIBUTION:")
+    print(result.evidence_attribution)
+
     if result["failures"]:
         print("\nFAILURES:")
         for failure in result["failures"]:

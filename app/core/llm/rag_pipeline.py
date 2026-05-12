@@ -145,6 +145,7 @@ def ask_with_context(query: str, step):
                 lifecycle_coherence_score=0,
                 operational_conflicts=[],
                 response_reliability_score=100,
+                evidence_attribution={},
             )
         
         retrieval_trace = retrieval_context["retrieval_trace"]
@@ -156,7 +157,7 @@ def ask_with_context(query: str, step):
         retrieval_confidence = retrieval_context["retrieval_confidence"]
         lifecycle_timeline = retrieval_context["lifecycle_timeline"]
         selected_chunks = retrieval_context["selected_chunks"]
-
+        evidence_attribution = retrieval_context.get("evidence_attribution",{})
         retry_attempted = retrieval_context.get(
             "retry_attempted",
             False
@@ -319,7 +320,8 @@ def ask_with_context(query: str, step):
             retrieval_stability_score=retrieval_stability_score,
             lifecycle_coherence_score=lifecycle_coherence_score,
             operational_conflicts=operational_conflicts,
-            response_reliability_score=response_reliability_score
+            response_reliability_score=response_reliability_score,
+            evidence_attribution=evidence_attribution,
         )
     except Exception as e:
         logger.error(f"Error asking with context: {e}")
@@ -340,4 +342,5 @@ def ask_with_context(query: str, step):
             lifecycle_coherence_score=0,
             operational_conflicts=[],
             response_reliability_score=100,
+            evidence_attribution={},
         )
