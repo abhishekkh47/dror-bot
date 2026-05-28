@@ -221,11 +221,93 @@ if should_cache_response(execution_result):
 - No cache warming or precomputation — reactive caching only
 - No per-user response variation — cache is session-independent (correct for operational guidance)
 
+---
+
+## Step 6.3: Observability & metrics pipeline
+
+**Category:** Production AI Telemetry
+
+**What:** Introduced centralized orchestration telemetry. Every request now emits a structured telemetry event containing retrieval metrics, reasoning metrics, latency measurements, reliability scores, and cache performance signals. Both cache hits and full pipeline executions are instrumented.
+
+**The problem — invisible degradation:**
+
+The system computes confidence, coherence, ambiguity, reliability, retry behavior, and fallback decisions — but all of this exists only inside `ExecutionResult` objects and scattered log messages. There is no centralized way to see:
+- How often fallbacks happen
+- Which domains fail most
+- Cache hit rate
+- Ambiguity frequency
+- Retrieval instability trends
+- Latency bottlenecks
+
+Enterprise AI systems fail because of invisible degradation, not bad architecture.
+
+**What was built:**
+
+**`app/core/observability/telemetry.py`** — `build_telemetry_event()`:
+
+Builds a structured telemetry dict from every `ExecutionResult`. Captures:
+
+| Signal | Source | Why |
+|--------|--------|-----|
+| `query` | Request | Query identification (for pattern analysis) |
+| `step_id` | Step | Domain/flow segmentation |
+| `rag_topic` | Step | Knowledge domain tracking |
+| `cache_hit` | Pipeline | Cache effectiveness measurement |
+| `retrieval_confidence` | ExecutionResult | Retrieval quality tracking |
+| `response_mode` | ExecutionResult | Fallback/clarification rate tracking |
+| `quality_score` | ExecutionResult | Response quality trends |
+| `retrieval_stability_score` | ExecutionResult | Retrieval consistency monitoring |
+| `lifecycle_coherence_score` | ExecutionResult | Evidence coherence trends |
+| `response_reliability_score` | ExecutionResult | Overall reliability monitoring |
+| `retry_attempted` | ExecutionResult | Retry rate tracking |
+| `reasoning_issue_count` | ExecutionResult | Reasoning failure frequency |
+| `operational_conflict_count` | ExecutionResult | Conflict detection rate |
+| `operational_ambiguity_count` | ExecutionResult | Ambiguity frequency |
+| `selected_chunk_count` | ExecutionResult | Retrieval volume monitoring |
+| `latency_ms` | Pipeline timing | Latency bottleneck detection |
+
+**`app/core/observability/telemetry_logger.py`** — `log_telemetry_event()`:
+
+Emits telemetry events as structured JSON via the application logger under `RAG_TELEMETRY` message type. Designed for easy downstream parsing by log aggregation systems (ELK, Datadog, CloudWatch).
+
+**Pipeline integration in `rag_pipeline.py`:**
+
+Two telemetry emission points:
+
+1. **Cache hit path** — emits telemetry with `cache_hit=True` and cache-lookup latency, then returns early. Without this, cached requests would be invisible to monitoring.
+
+2. **Full pipeline path** — emits telemetry with `cache_hit=False` and total orchestration latency after `ExecutionResult` construction.
+
+Latency measured from `request_start = time.time()` set immediately after entering the `try` block.
+
+**What this changes:**
+
+| Before | After |
+|--------|-------|
+| Telemetry scattered across log messages | Centralized structured telemetry events |
+| Cache hits invisible | Cache hits emit telemetry with `cache_hit=True` |
+| No latency measurement | End-to-end latency captured per request |
+| Cannot measure fallback rate | `response_mode` tracked per event |
+| Cannot detect retrieval degradation | Confidence/stability/coherence tracked per event |
+| Cannot measure cache effectiveness | `cache_hit` boolean in every event |
+
+**What is explicitly NOT logged (security):**
+- Raw user secrets or payment credentials
+- Full chunk content or prompt text
+- Sensitive session memory payloads
+
+Telemetry contains operational signals only.
+
+**What this step did NOT change:**
+- No Prometheus/Grafana integration yet — structured logs are the starting point
+- No aggregation or dashboarding — that requires a log pipeline consumer
+- No alerting rules — thresholds and alerting come after baseline measurement
+- No distributed tracing — single-service telemetry is sufficient for current architecture
+
 **Productionization roadmap — remaining steps:**
 
 | Step | Focus | Priority |
 |------|-------|----------|
-| 6.3 | Prompt size governance | HIGH — token budgeting and context truncation |
-| 6.4 | Real eval dataset | HIGH — 100-500 realistic support questions |
-| 6.5 | Observability dashboard | HIGH — metrics, rates, latency tracking |
+| 6.4 | Prompt size governance | HIGH — token budgeting and context truncation |
+| 6.5 | Real eval dataset | HIGH — 100-500 realistic support questions |
 | 6.6 | Human escalation governance | HIGH — when to stop answering |

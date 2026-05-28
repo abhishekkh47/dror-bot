@@ -1,3 +1,4 @@
+import time
 from app.core.cache.cache_keys import build_response_cache_key
 from app.core.cache.cache_policy import should_cache_response
 from app.core.cache.response_cache import get_cached_response, save_cached_response
@@ -8,6 +9,8 @@ from app.core.memory.memory_reset import reset_session_memory, should_reset_inve
 from app.core.memory.memory_store import get_session_memory, save_session_memory
 from app.core.memory.memory_updater import update_session_memory
 from app.core.memory.session_memory import SessionMemory
+from app.core.observability.telemetry import build_telemetry_event
+from app.core.observability.telemetry_logger import log_telemetry_event
 from app.core.rag.confidence_policy import build_confidence_policy
 from app.core.rag.context_builder import build_structured_context
 from app.core.rag.fallback_policy import determine_response_mode
@@ -127,6 +130,7 @@ def ask_with_context(query: str, step, session_id: str = "default"):
     try:
         print("\nSTEP DOMAIN:", step.domain)
         print("STEP RAG TOPIC:", step.rag_topic)
+        request_start = time.time()
 
         session_memory = get_session_memory(session_id)
 
@@ -147,9 +151,22 @@ def ask_with_context(query: str, step, session_id: str = "default"):
         )
 
         if cached_response:
-            return ExecutionResult(
+            cached_result = ExecutionResult(
                 **cached_response
             )
+            cache_latency_ms = int(
+                (time.time() - request_start) * 1000
+            )
+            log_telemetry_event(
+                build_telemetry_event(
+                    execution_result=cached_result,
+                    query=query,
+                    step=step,
+                    total_latency_ms=cache_latency_ms,
+                    cache_hit=True,
+                )
+            )
+            return cached_result
 
         retrieval_context = build_retrieval_context(query=query, step=step, session_memory=session_memory)
         diagnostic = retrieval_context.get("diagnostic")
@@ -385,6 +402,20 @@ def ask_with_context(query: str, step, session_id: str = "default"):
             reasoning_breakdown=reasoning_breakdown,
             operational_ambiguities=operational_ambiguities,
         )
+        
+        total_latency_ms = int(
+            (
+                time.time() - request_start
+            ) * 1000
+        )
+
+        telemetry_event = build_telemetry_event(
+            execution_result=execution_result,
+            query=query,
+            step=step,
+            total_latency_ms=total_latency_ms,
+        )
+        log_telemetry_event(telemetry_event)
 
         if should_cache_response(execution_result):
             save_cached_response(
