@@ -1,6 +1,10 @@
 from app.core.llm.retriever import retrieve_context, store
 from app.core.llm.prompt import build_prompt, build_prompt_with_step
 from app.core.llm.llm import generate_response
+from app.core.memory.memory_reset import reset_session_memory, should_reset_investigation
+from app.core.memory.memory_store import get_session_memory, save_session_memory
+from app.core.memory.memory_updater import update_session_memory
+from app.core.memory.session_memory import SessionMemory
 from app.core.rag.confidence_policy import build_confidence_policy
 from app.core.rag.context_builder import build_structured_context
 from app.core.rag.fallback_policy import determine_response_mode
@@ -100,7 +104,8 @@ def detect_response_intent(query: str):
 
     return "generic_failure"
 
-def ask_with_context(query: str, step, session_memory=None):
+# def ask_with_context(query: str, step, session_memory=None):
+def ask_with_context(query: str, step, session_id: str = "default"):
     """
     High-level RAG orchestration layer.
 
@@ -119,6 +124,14 @@ def ask_with_context(query: str, step, session_memory=None):
     try:
         print("\nSTEP DOMAIN:", step.domain)
         print("STEP RAG TOPIC:", step.rag_topic)
+
+        session_memory = get_session_memory(session_id)
+
+        if session_memory and should_reset_investigation(session_memory = session_memory, current_query = query):
+            session_memory = reset_session_memory(session_id)
+        
+        if not session_memory:
+            session_memory = SessionMemory(session_id=session_id)
 
         retrieval_context = build_retrieval_context(query=query, step=step, session_memory=session_memory)
         diagnostic = retrieval_context.get("diagnostic")
@@ -237,6 +250,21 @@ def ask_with_context(query: str, step, session_memory=None):
             ""
         )
 
+        memory_summary = (
+            session_memory.investigation_summary
+        )
+
+        memory_context = (
+            f"Lifecycle States: "
+            f"{memory_summary.get('active_lifecycle_states', [])}\n"
+
+            f"Operational Findings: "
+            f"{memory_summary.get('major_operational_findings', [])}\n"
+
+            f"Active Topics: "
+            f"{memory_summary.get('active_topics', [])}"
+        )
+
         prompt = build_prompt_with_step(
             query=query,
             context=context,
@@ -246,9 +274,18 @@ def ask_with_context(query: str, step, session_memory=None):
             operational_evidence=operational_evidence,
             response_constraints=response_constraints,
             confidence_policy=confidence_policy,
+            memory_context=memory_context,
         )
 
         response = generate_response(prompt)
+        session_memory = update_session_memory(
+            session_memory = session_memory,
+            lifecycle_facts = lifecycle_facts,
+            reasoning_breakdown = reasoning_breakdown,
+            evidence_attribution = evidence_attribution,
+            response = response,
+        )
+        save_session_memory(session_memory)
         reasoning_issues = (
             validate_reasoning_consistency(
                 response=response,

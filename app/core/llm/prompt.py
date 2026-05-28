@@ -152,7 +152,8 @@ def build_prompt_with_step(
     failure_summary: dict,
     operational_evidence: list[str],
     response_constraints: list[str],
-    confidence_policy: dict
+    confidence_policy: dict,
+    memory_context: str,
 ) -> str:
     evidence_block = "\n".join([
         f"- {item}"
@@ -191,4 +192,5 @@ def build_prompt_with_step(
         response_pattern=response_pattern,
         constraints_block=constraints_block,
         confidence_policy_block=confidence_policy_block,
+        memory_context=memory_context,
     )
