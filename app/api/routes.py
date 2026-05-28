@@ -19,11 +19,11 @@ def start_flow(flow_id: str):
     return { "session": session, "step": step }
 
 @router.post("/flow/input")
-def process_input(session_id: str, user_input: str):
+async def process_input(session_id: str, user_input: str):
     try:
         step = engine.process_input(session_id, user_input)
 
-        result = ask_with_context(
+        result = await ask_with_context(
             query=user_input,
             step=step
         )

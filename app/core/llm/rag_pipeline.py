@@ -1,3 +1,4 @@
+import asyncio
 import time
 from app.core.cache.cache_keys import build_response_cache_key
 from app.core.cache.cache_policy import should_cache_response
@@ -10,7 +11,7 @@ from app.core.memory.memory_store import get_session_memory, save_session_memory
 from app.core.memory.memory_updater import update_session_memory
 from app.core.memory.session_memory import SessionMemory
 from app.core.observability.telemetry import build_telemetry_event
-from app.core.observability.telemetry_logger import log_telemetry_event
+from app.core.observability.telemetry_logger import async_log_telemetry_event
 from app.core.rag.confidence_policy import build_confidence_policy
 from app.core.rag.context_builder import build_structured_context
 from app.core.rag.fallback_policy import determine_response_mode
@@ -110,21 +111,19 @@ def detect_response_intent(query: str):
 
     return "generic_failure"
 
-# def ask_with_context(query: str, step, session_memory=None):
-def ask_with_context(query: str, step, session_id: str = "default"):
+async def ask_with_context(query: str, step, session_id: str = "default"):
     """
-    High-level RAG orchestration layer.
+    High-level async RAG orchestration layer.
 
     Pipeline:
-    1. Retrieval orchestration
-    2. Structured filtering
-    3. Lifecycle-aware selection
-    4. Retrieval validation
-    5. Operational distillation
-    6. Structured context assembly
-    7. Prompt generation
-    8. LLM response generation
-    9. Response sanitization
+    1. Memory loading (async Redis)
+    2. Cache check (async Redis)
+    3. Retrieval orchestration
+    4. Structured filtering + lifecycle-aware selection
+    5. Operational distillation + context assembly
+    6. Prompt generation + LLM response generation
+    7. Response sanitization + quality scoring
+    8. Background: memory save, cache save, telemetry
     """
 
     try:
@@ -132,45 +131,41 @@ def ask_with_context(query: str, step, session_id: str = "default"):
         print("STEP RAG TOPIC:", step.rag_topic)
         request_start = time.time()
 
-        session_memory = get_session_memory(session_id)
+        session_memory = await get_session_memory(session_id)
 
-        if session_memory and should_reset_investigation(session_memory = session_memory, current_query = query):
+        if session_memory and should_reset_investigation(session_memory=session_memory, current_query=query):
             session_memory = reset_session_memory(session_id)
-        
+
         if not session_memory:
             session_memory = SessionMemory(session_id=session_id)
-        
-        # RESPONSE CACHE CHECK
+
         cache_key = build_response_cache_key(
             query=query,
             step=step,
         )
 
-        cached_response = get_cached_response(
-            cache_key
-        )
+        cached_response = await get_cached_response(cache_key)
 
         if cached_response:
-            cached_result = ExecutionResult(
-                **cached_response
-            )
+            cached_result = ExecutionResult(**cached_response)
             cache_latency_ms = int(
                 (time.time() - request_start) * 1000
             )
-            log_telemetry_event(
-                build_telemetry_event(
-                    execution_result=cached_result,
-                    query=query,
-                    step=step,
-                    total_latency_ms=cache_latency_ms,
-                    cache_hit=True,
+            asyncio.create_task(
+                async_log_telemetry_event(
+                    build_telemetry_event(
+                        execution_result=cached_result,
+                        query=query,
+                        step=step,
+                        total_latency_ms=cache_latency_ms,
+                        cache_hit=True,
+                    )
                 )
             )
             return cached_result
 
         retrieval_context = build_retrieval_context(query=query, step=step, session_memory=session_memory)
         diagnostic = retrieval_context.get("diagnostic")
-        # TEMP DEVELOPMENT RESPONSE
         if diagnostic and diagnostic.failed_stage:
             response = (
                 f"No relevant context found. "
@@ -197,9 +192,8 @@ def ask_with_context(query: str, step, session_id: str = "default"):
                 reasoning_breakdown={},
                 operational_ambiguities=[],
             )
-        
+
         retrieval_trace = retrieval_context["retrieval_trace"]
-        # TEMP DEBUGGING ONLY
         print_retrieval_trace(retrieval_trace)
         distilled_chunks = retrieval_context["distilled_chunks"]
         lifecycle_facts = retrieval_context["lifecycle_facts"]
@@ -207,51 +201,20 @@ def ask_with_context(query: str, step, session_id: str = "default"):
         retrieval_confidence = retrieval_context["retrieval_confidence"]
         lifecycle_timeline = retrieval_context["lifecycle_timeline"]
         selected_chunks = retrieval_context["selected_chunks"]
-        evidence_attribution = retrieval_context.get("evidence_attribution",{})
-        reasoning_breakdown = retrieval_context.get("reasoning_breakdown",{})
-        operational_ambiguities = retrieval_context.get("operational_ambiguities",[])
-        retry_attempted = retrieval_context.get(
-            "retry_attempted",
-            False
+        evidence_attribution = retrieval_context.get("evidence_attribution", {})
+        reasoning_breakdown = retrieval_context.get("reasoning_breakdown", {})
+        operational_ambiguities = retrieval_context.get("operational_ambiguities", [])
+        retry_attempted = retrieval_context.get("retry_attempted", False)
+        initial_retrieval_confidence = retrieval_context.get(
+            "initial_retrieval_confidence", retrieval_confidence,
         )
-        initial_retrieval_confidence = (
-            retrieval_context.get(
-                "initial_retrieval_confidence",
-                retrieval_confidence,
-            )
+        final_retrieval_confidence = retrieval_context.get(
+            "final_retrieval_confidence", retrieval_confidence,
         )
-        final_retrieval_confidence = (
-            retrieval_context.get(
-                "final_retrieval_confidence",
-                retrieval_confidence,
-            )
-        )
-        retry_confidence_delta = (
-            retrieval_context.get(
-                "retry_confidence_delta",
-                0.0,
-            )
-        )
-        retrieval_stability_score = (
-            retrieval_context.get(
-                "retrieval_stability_score",
-                100,
-            )
-        )
-
-        lifecycle_coherence_score = (
-            retrieval_context.get(
-                "lifecycle_coherence_score",
-                0,
-            )
-        )
-
-        operational_conflicts = (
-            retrieval_context.get(
-                "operational_conflicts",
-                [],
-            )
-        )
+        retry_confidence_delta = retrieval_context.get("retry_confidence_delta", 0.0)
+        retrieval_stability_score = retrieval_context.get("retrieval_stability_score", 100)
+        lifecycle_coherence_score = retrieval_context.get("lifecycle_coherence_score", 0)
+        operational_conflicts = retrieval_context.get("operational_conflicts", [])
 
         response_reliability_score = compute_response_reliability(
             retrieval_confidence=retrieval_confidence,
@@ -269,33 +232,26 @@ def ask_with_context(query: str, step, session_id: str = "default"):
         context = build_structured_context(
             context_chunks=distilled_chunks,
             operational_evidence=operational_evidence,
-            lifecycle_timeline=lifecycle_timeline
+            lifecycle_timeline=lifecycle_timeline,
         )
 
         response_constraints = build_response_constraints(
             retrieval_confidence=retrieval_confidence,
             lifecycle_facts=lifecycle_facts,
         )
-        
+
         confidence_policy = build_confidence_policy(retrieval_confidence)
 
         response_intent = detect_response_intent(query)
-        response_pattern = RESPONSE_PATTERNS.get(
-            response_intent,
-            ""
-        )
+        response_pattern = RESPONSE_PATTERNS.get(response_intent, "")
 
-        memory_summary = (
-            session_memory.investigation_summary
-        )
+        memory_summary = session_memory.investigation_summary
 
         memory_context = (
             f"Lifecycle States: "
             f"{memory_summary.get('active_lifecycle_states', [])}\n"
-
             f"Operational Findings: "
             f"{memory_summary.get('major_operational_findings', [])}\n"
-
             f"Active Topics: "
             f"{memory_summary.get('active_topics', [])}"
         )
@@ -314,18 +270,16 @@ def ask_with_context(query: str, step, session_id: str = "default"):
 
         response = generate_response(prompt)
         session_memory = update_session_memory(
-            session_memory = session_memory,
-            lifecycle_facts = lifecycle_facts,
-            reasoning_breakdown = reasoning_breakdown,
-            evidence_attribution = evidence_attribution,
-            response = response,
+            session_memory=session_memory,
+            lifecycle_facts=lifecycle_facts,
+            reasoning_breakdown=reasoning_breakdown,
+            evidence_attribution=evidence_attribution,
+            response=response,
         )
-        save_session_memory(session_memory)
-        reasoning_issues = (
-            validate_reasoning_consistency(
-                response=response,
-                lifecycle_facts=lifecycle_facts,
-            )
+
+        reasoning_issues = validate_reasoning_consistency(
+            response=response,
+            lifecycle_facts=lifecycle_facts,
         )
         if reasoning_issues:
             logger.warning(
@@ -334,26 +288,16 @@ def ask_with_context(query: str, step, session_id: str = "default"):
                     "issues": reasoning_issues,
                     "query": query,
                     "retrieval_confidence": retrieval_confidence,
-                }
+                },
             )
-        
-        # reasoning_issues.extend(
-        #     lifecycle_drift_issues
-        # )
-        reasoning_issues.extend(
-            operational_conflicts
-        )
-        
-        retrieval_recovery_eligible = (
-            should_retry_retrieval(
-                retrieval_confidence=
-                    retrieval_confidence,
 
-                lifecycle_drift_issues=
-                    lifecycle_drift_issues,
-            )
+        reasoning_issues.extend(operational_conflicts)
+
+        retrieval_recovery_eligible = should_retry_retrieval(
+            retrieval_confidence=retrieval_confidence,
+            lifecycle_drift_issues=lifecycle_drift_issues,
         )
-        
+
         response_mode = determine_response_mode(
             retrieval_confidence=retrieval_confidence,
             reasoning_issues=reasoning_issues,
@@ -373,7 +317,7 @@ def ask_with_context(query: str, step, session_id: str = "default"):
                 "be required to determine the exact "
                 "payment failure reason."
             )
-        
+
         quality_score = score_response_quality(
             response=response,
             retrieval_confidence=retrieval_confidence,
@@ -402,11 +346,9 @@ def ask_with_context(query: str, step, session_id: str = "default"):
             reasoning_breakdown=reasoning_breakdown,
             operational_ambiguities=operational_ambiguities,
         )
-        
+
         total_latency_ms = int(
-            (
-                time.time() - request_start
-            ) * 1000
+            (time.time() - request_start) * 1000
         )
 
         telemetry_event = build_telemetry_event(
@@ -415,12 +357,19 @@ def ask_with_context(query: str, step, session_id: str = "default"):
             step=step,
             total_latency_ms=total_latency_ms,
         )
-        log_telemetry_event(telemetry_event)
 
+        asyncio.create_task(
+            async_log_telemetry_event(telemetry_event)
+        )
+        asyncio.create_task(
+            save_session_memory(session_memory)
+        )
         if should_cache_response(execution_result):
-            save_cached_response(
-                cache_key=cache_key,
-                payload=execution_result.model_dump(),
+            asyncio.create_task(
+                save_cached_response(
+                    cache_key=cache_key,
+                    payload=execution_result.model_dump(),
+                )
             )
 
         return execution_result

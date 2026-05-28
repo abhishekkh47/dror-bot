@@ -304,10 +304,117 @@ Telemetry contains operational signals only.
 - No alerting rules — thresholds and alerting come after baseline measurement
 - No distributed tracing — single-service telemetry is sufficient for current architecture
 
+---
+
+## Step 6.4: Async orchestration pipeline
+
+**Category:** Concurrency & Latency Engineering
+
+**What:** Converted the entire orchestration pipeline from blocking sequential execution to async Python. Redis operations use `redis.asyncio`, the core `ask_with_context()` function is now `async`, and non-critical side effects (memory persistence, cache saves, telemetry) are backgrounded via `asyncio.create_task()` so they never block response delivery.
+
+**The problem — sequential latency stacking:**
+
+The orchestration pipeline executes ~10 stages serially: memory load → cache check → retrieval → filtering → scoring → prompt build → LLM generation → sanitization → memory save → telemetry. As traffic grows, this creates latency stacking — every stage waits for the previous one, even when some operations (memory saves, telemetry, cache writes) don't need to complete before the response is returned.
+
+Redis calls (memory load, cache check, memory save, cache save) were synchronous, blocking the Python event loop and preventing concurrent request handling.
+
+**What was changed:**
+
+**`app/core/cache/redis_client.py`** — Async Redis client:
+
+| Before | After |
+|--------|-------|
+| `import redis` | `from redis.asyncio import Redis` |
+| `redis.ConnectionPool(...)` | `Redis(...)` with async connection pool |
+| `def is_redis_available()` | `async def is_redis_available()` |
+| `redis_client.ping()` | `await redis_client.ping()` |
+
+**`app/core/memory/memory_store.py`** — All functions async:
+
+| Function | Change |
+|----------|--------|
+| `get_session_memory()` | `async def` + `await redis_client.get()` |
+| `save_session_memory()` | `async def` + `await redis_client.set()` |
+| `delete_session_memory()` | `async def` + `await redis_client.delete()` |
+
+Redis exception handling changed from `import redis as redis_lib` to `from redis import exceptions as redis_exceptions` for cleaner async compatibility.
+
+**`app/core/cache/response_cache.py`** — All functions async:
+
+| Function | Change |
+|----------|--------|
+| `get_cached_response()` | `async def` + `await redis_client.get()` |
+| `save_cached_response()` | `async def` + `await redis_client.set()` |
+
+**`app/core/observability/telemetry_logger.py`** — Added async wrapper:
+
+| Function | Purpose |
+|----------|---------|
+| `log_telemetry_event()` | Sync version (preserved for backwards compatibility) |
+| `async_log_telemetry_event()` | Async-compatible wrapper for `asyncio.create_task()` |
+
+**`app/core/llm/rag_pipeline.py`** — Major async conversion:
+
+`ask_with_context()` converted to `async def`. Three categories of changes:
+
+1. **Critical-path awaits** (must complete before response):
+   - `await get_session_memory(session_id)` — need memory before retrieval
+   - `await get_cached_response(cache_key)` — need cache result before deciding to compute
+
+2. **Backgrounded side effects** (do not block response delivery):
+   ```python
+   asyncio.create_task(async_log_telemetry_event(telemetry_event))
+   asyncio.create_task(save_session_memory(session_memory))
+   asyncio.create_task(save_cached_response(cache_key, payload))
+   ```
+
+3. **Unchanged** (CPU-bound, no I/O):
+   - `build_retrieval_context()` — vector search + filtering (future async candidate)
+   - `generate_response()` — LLM call (future async candidate)
+   - All scoring, validation, sanitization functions
+
+**Callers updated:**
+
+| File | Change |
+|------|--------|
+| `app/api/routes.py` | `def process_input()` → `async def process_input()` + `await ask_with_context()` |
+| `app/tests/evals/evaluator.py` | Core logic moved to `async _run_all_evals_async()`, sync `run_all_evals()` wraps with `asyncio.run()` |
+
+FastAPI natively supports `async def` endpoints, so the route conversion is seamless.
+
+**What the critical path looks like now:**
+
+```
+await memory_load  →  await cache_check  →  retrieval  →  generation  →  return response
+                                                                              ↓ (backgrounded)
+                                                                        memory_save
+                                                                        cache_save
+                                                                        telemetry
+```
+
+Non-critical writes no longer block response delivery.
+
+**What this changes:**
+
+| Before | After |
+|--------|-------|
+| Blocking sequential execution | Async orchestration with backgrounded side effects |
+| Redis calls block event loop | Redis calls are non-blocking `await` |
+| Memory save blocks response | Memory save backgrounded via `create_task` |
+| Cache save blocks response | Cache save backgrounded via `create_task` |
+| Telemetry blocks response | Telemetry backgrounded via `create_task` |
+| Single concurrent request per worker | Multiple concurrent requests per worker |
+
+**What this step did NOT change:**
+- `build_retrieval_context()` and `generate_response()` remain synchronous — these are the heaviest operations and will need async conversion in a future step (likely with `httpx` async for LLM calls)
+- No distributed task queue (Celery/Kafka) — `asyncio.create_task` is sufficient for current single-process concurrency
+- No connection pool tuning beyond defaults — Redis async pool handles this automatically
+- Backgrounded tasks may fail silently — acceptable for telemetry/cache; memory save failures degrade gracefully via the existing fallback store
+
 **Productionization roadmap — remaining steps:**
 
 | Step | Focus | Priority |
 |------|-------|----------|
-| 6.4 | Prompt size governance | HIGH — token budgeting and context truncation |
-| 6.5 | Real eval dataset | HIGH — 100-500 realistic support questions |
-| 6.6 | Human escalation governance | HIGH — when to stop answering |
+| 6.5 | Prompt size governance | HIGH — token budgeting and context truncation |
+| 6.6 | Real eval dataset | HIGH — 100-500 realistic support questions |
+| 6.7 | Human escalation governance | HIGH — when to stop answering |

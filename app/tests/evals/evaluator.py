@@ -1,3 +1,5 @@
+import asyncio
+
 from app.core.llm.rag_pipeline import ask_with_context
 
 from app.tests.evals.evaluation_metrics import score_response_quality
@@ -38,15 +40,15 @@ def evaluate_response(test_case, response):
     }
 
 
-def run_all_evals():
+async def _run_all_evals_async():
     """
-    Run all regression evaluations.
+    Run all regression evaluations (async).
     """
 
     results = []
 
     for test_case in TEST_CASES:
-        result = ask_with_context(test_case["query"], test_case["step"])
+        result = await ask_with_context(test_case["query"], test_case["step"])
         response = result.response
         execution_metrics = build_execution_metrics(result)
         retrieval_metrics = evaluate_retrieval_quality(result.selected_chunks)
@@ -74,3 +76,10 @@ def run_all_evals():
         })
 
     return results
+
+
+def run_all_evals():
+    """
+    Sync entry point for running evaluations.
+    """
+    return asyncio.run(_run_all_evals_async())

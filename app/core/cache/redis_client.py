@@ -1,7 +1,7 @@
 import os
 import logging
 
-import redis
+from redis.asyncio import Redis
 
 logger = logging.getLogger(__name__)
 
@@ -14,7 +14,7 @@ MEMORY_TTL_SECONDS = int(
     os.getenv("MEMORY_TTL_SECONDS", "3600")
 )
 
-_pool = redis.ConnectionPool(
+redis_client = Redis(
     host=REDIS_HOST,
     port=REDIS_PORT,
     db=REDIS_DB,
@@ -26,12 +26,10 @@ _pool = redis.ConnectionPool(
     retry_on_timeout=True,
 )
 
-redis_client = redis.Redis(connection_pool=_pool)
 
-
-def is_redis_available():
+async def is_redis_available():
     try:
-        return redis_client.ping()
-    except (redis.ConnectionError, redis.TimeoutError):
+        return await redis_client.ping()
+    except (ConnectionError, TimeoutError, OSError):
         logger.warning("Redis unavailable")
         return False

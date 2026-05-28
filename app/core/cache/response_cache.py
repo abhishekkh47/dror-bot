@@ -2,7 +2,7 @@ import json
 import logging
 import os
 
-import redis as redis_lib
+from redis import exceptions as redis_exceptions
 
 from app.core.cache.redis_client import (
     redis_client,
@@ -16,18 +16,18 @@ CACHE_TTL = int(
 )
 
 
-def get_cached_response(cache_key):
-    if not is_redis_available():
+async def get_cached_response(cache_key):
+    if not await is_redis_available():
         return None
 
     try:
-        raw = redis_client.get(cache_key)
+        raw = await redis_client.get(cache_key)
         if not raw:
             return None
         return json.loads(raw)
     except (
-        redis_lib.ConnectionError,
-        redis_lib.TimeoutError,
+        redis_exceptions.ConnectionError,
+        redis_exceptions.TimeoutError,
     ) as e:
         logger.warning(
             "Cache read failed",
@@ -36,19 +36,19 @@ def get_cached_response(cache_key):
         return None
 
 
-def save_cached_response(cache_key, payload):
-    if not is_redis_available():
+async def save_cached_response(cache_key, payload):
+    if not await is_redis_available():
         return
 
     try:
-        redis_client.set(
+        await redis_client.set(
             cache_key,
             json.dumps(payload),
             ex=CACHE_TTL,
         )
     except (
-        redis_lib.ConnectionError,
-        redis_lib.TimeoutError,
+        redis_exceptions.ConnectionError,
+        redis_exceptions.TimeoutError,
     ) as e:
         logger.warning(
             "Cache write failed",
