@@ -546,6 +546,72 @@ if should_escalate_to_human(query, execution_result):
 - No escalation cooldown or rate limiting — every matching query triggers escalation independently
 - No semantic escalation detection — pattern matching only (sufficient for known sensitive terms)
 
+---
+
+## Step 6.7: Abuse prevention & rate governance
+
+**Category:** Production Security & Operational Protection
+
+**What:** Introduced request-level security governance that blocks prompt injection attempts, rejects oversized queries, and rate-limits sessions — all before expensive orchestration begins. Rate limiting is Redis-backed and fails open (allows requests through if Redis is unavailable).
+
+**The problem — assuming cooperative users:**
+
+The system has memory, retrieval orchestration, contextual continuity, and operational reasoning. This increases the attack surface: a malicious user can attempt prompt injection through the query, flood the system with retry abuse to exhaust tokens, send oversized queries to inflate orchestration cost, or use contextual poisoning through memory-aware retrieval. Without request-level governance, even well-architected systems become unstable under adversarial traffic.
+
+**Key principle:** Production AI systems require operational guardrails, not merely good prompts.
+
+**What was built:**
+
+**`app/core/security/request_guard.py`** — `validate_request()`:
+
+Two validation gates:
+
+| Gate | Condition | Response |
+|------|-----------|----------|
+| Query size | `len(query) > 2000` chars | `"Query too large"` |
+| Injection patterns | Query contains any of 5 blocked patterns | `"Unsafe request pattern detected"` |
+
+Blocked patterns: `ignore previous instructions`, `reveal system prompt`, `show hidden prompt`, `bypass restrictions`, `override instructions`.
+
+Returns `(is_valid, error_message)` tuple. Runs before any Redis or retrieval operations.
+
+**`app/core/security/rate_limiter.py`** — `is_rate_limited()`:
+
+| Feature | Implementation |
+|---------|---------------|
+| Window | 60 seconds sliding window per session |
+| Limit | 30 requests per window |
+| Storage | Redis key `drorbot:ratelimit:{session_id}` with `INCR` + `EXPIRE` |
+| Fail-open | Redis unavailable → allow request (never block users because rate limiter is broken) |
+| Error isolation | Connection/timeout errors caught, logged, and treated as "not limited" |
+
+**Pipeline integration in `rag_pipeline.py`:**
+
+Both checks run immediately after `request_start` timing — before memory loading, before cache check, before any retrieval. Blocked and rate-limited requests return immediately with minimal `ExecutionResult` (all required fields populated with safe defaults).
+
+```
+request_start  →  validate_request  →  is_rate_limited  →  memory  →  cache  →  orchestration
+                      ↓ blocked            ↓ rate limited
+                   early return           early return
+```
+
+**What this changes:**
+
+| Before | After |
+|--------|-------|
+| All queries reach orchestration | Injection attempts blocked before any compute |
+| No query size limit | Queries > 2000 chars rejected |
+| No rate limiting | 30 requests/minute per session |
+| Redis failure blocks users | Rate limiter fails open (allows requests through) |
+| Abuse consumes full pipeline resources | Abuse rejected at request boundary |
+
+**What this step did NOT change:**
+- No IP-based rate limiting — session-based only (sufficient for authenticated API)
+- No semantic injection detection — pattern matching only (covers common injection attempts)
+- No rate limit headers in response — the API doesn't yet communicate remaining quota
+- No per-endpoint rate differentiation — all requests share the same limit
+- No abuse logging/alerting — blocked requests return immediately without telemetry (future improvement)
+
 **Current architecture status after Phase 7:**
 
 | Capability | Status |
@@ -557,5 +623,6 @@ if should_escalate_to_human(query, execution_result):
 | Prompt governance | Done |
 | Observability | Done |
 | Human escalation boundaries | Done |
+| Abuse prevention & rate limiting | Done |
 
-**The productionization phase is now complete.** The system has transitioned from architecture experimentation to operational system engineering. Remaining frontiers are: real eval datasets, admin observability dashboards, abuse prevention, rate limiting, deployment pipelines, autoscaling, and load testing.
+**Phase 7 — Productionization is now complete.** The system has transitioned from architecture experimentation to operational system engineering. The remaining frontiers are: real eval datasets, admin observability dashboards, deployment architecture, CI/CD pipelines, autoscaling, load testing, and canary evaluation.

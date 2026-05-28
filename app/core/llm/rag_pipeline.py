@@ -26,6 +26,8 @@ from app.core.rag.retrieval_debugger import print_retrieval_trace
 from app.core.rag.retrieval_metadata import get_capability, get_lifecycle_stage
 from app.core.rag.retrieval_pipeline import build_retrieval_context
 from app.core.rag.retrieval_recovery import should_retry_retrieval
+from app.core.security.rate_limiter import is_rate_limited
+from app.core.security.request_guard import validate_request
 from app.core.types import ExecutionResult
 from app.tests.evals.evaluation_metrics import score_response_quality
 from app.utils.patterns import RESPONSE_PATTERNS, CONTRADICTION_PATTERNS, CLEANUP_PATTERNS, INTERNAL_PATTERNS
@@ -133,6 +135,32 @@ async def ask_with_context(query: str, step, session_id: str = "default"):
         print("\nSTEP DOMAIN:", step.domain)
         print("STEP RAG TOPIC:", step.rag_topic)
         request_start = time.time()
+        
+        is_valid, validation_error = validate_request(query)
+        if not is_valid:
+            return ExecutionResult(
+                response=validation_error,
+                retrieval_confidence=0.0,
+                response_mode="blocked",
+                reasoning_issues=[],
+                quality_score=0,
+                selected_chunks=[],
+                lifecycle_drift_issues=[],
+                retrieval_recovery_eligible=False,
+            )
+
+        rate_limited = await is_rate_limited(session_id)
+        if rate_limited:
+            return ExecutionResult(
+                response="Too many requests. Please try again later.",
+                retrieval_confidence=0.0,
+                response_mode="rate_limited",
+                reasoning_issues=[],
+                quality_score=0,
+                selected_chunks=[],
+                lifecycle_drift_issues=[],
+                retrieval_recovery_eligible=False,
+            )
 
         session_memory = await get_session_memory(session_id)
 
