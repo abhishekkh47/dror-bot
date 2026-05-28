@@ -612,6 +612,95 @@ request_start  →  validate_request  →  is_rate_limited  →  memory  →  ca
 - No per-endpoint rate differentiation — all requests share the same limit
 - No abuse logging/alerting — blocked requests return immediately without telemetry (future improvement)
 
+---
+
+## Step 6.8: Real evaluation dataset & regression testing
+
+**Category:** Production Quality Governance
+
+**What:** Introduced a structured regression evaluation suite with a real JSON dataset covering operational failures, escalation triggers, adversarial inputs, and abuse prevention. Each test validates response patterns, forbidden patterns, response mode, and escalation behavior. Test cases specify per-step context, and failure reports include detailed reasons.
+
+**The problem — evaluation blindness:**
+
+The existing evals were handcrafted, tiny, and mostly happy-path. The architecture is now complex enough that small changes (prompt tweaks, memory adjustments, scoring thresholds) can create hidden regressions. Without structured regression testing, there is no way to know whether a change improved or degraded the system.
+
+**Key principle:** Production AI quality depends on continuous evaluation, not merely initial implementation quality. Silent regressions are the primary failure mode of mature AI systems.
+
+**What was built:**
+
+**`app/tests/evals/eval_dataset.json`** — 9 structured test cases:
+
+| ID | Category | Tests |
+|----|----------|-------|
+| `processing_failure` | Normal retrieval | Expected patterns + forbidden patterns |
+| `missing_funds_escalation` | Escalation trigger | Sensitive pattern → human escalation |
+| `ambiguous_timeout` | Ambiguity handling | Lifecycle ambiguity response |
+| `cancellation_reason` | Lifecycle reasoning | Cancellation evidence + no false success claim |
+| `fraud_escalation` | Escalation trigger | Unauthorized transaction → human escalation |
+| `chargeback_escalation` | Escalation trigger | Chargeback → human escalation |
+| `platform_transaction_failure` | Cross-domain retrieval | Different step context (platform transaction) |
+| `injection_attempt` | Abuse prevention | Prompt injection → blocked mode |
+| `oversized_query` | Abuse prevention | Oversized query → blocked mode |
+
+Each test case specifies: `query`, `step_id`, `expected_response_patterns`, `forbidden_patterns`, `expected_response_mode`, `expected_escalation`.
+
+**`app/tests/evals/mock_step.py`** — Step fixtures:
+
+`EVAL_STEPS` dict containing `Step` objects for `payment-status-step`, `platform-transaction-step`, `auto-completion-step`. Each test case references a `step_id` to select its step context — tests are no longer limited to a single mock step.
+
+**`app/tests/evals/regression_runner.py`** — `run_regression_suite()`:
+
+| Feature | Implementation |
+|---------|---------------|
+| Per-test step context | Each test resolves its `step_id` from `EVAL_STEPS` |
+| Isolated sessions | Each test uses `session_id=eval_{test_id}` to prevent memory cross-contamination |
+| Pattern validation | Checks expected and forbidden patterns in response |
+| Mode validation | Verifies `response_mode` matches expectation |
+| Escalation validation | Verifies `human_escalation_required` matches expectation |
+| Failure reasons | Captures specific reason for each failing check |
+| Execution metadata | Returns `response_mode`, `reliability_score`, `escalated` per result |
+
+**`app/tests/evals/eval_reporter.py`** — `print_eval_report()`:
+
+Prints structured report with pass/fail per test. Failed tests show indented failure reasons. Summary shows pass/fail counts.
+
+```
+===================
+REGRESSION RESULTS
+===================
+PASS - processing_failure
+FAIL - ambiguous_timeout
+       Response mode: expected 'clarification', got 'normal'
+PASS - fraud_escalation
+-------------------
+PASSED 8/9
+FAILED 1/9
+===================
+```
+
+**`app/tests/evals/run_regressions.py`** — Entry point:
+
+```bash
+python -m app.tests.evals.run_regressions
+```
+
+**What this changes:**
+
+| Before | After |
+|--------|-------|
+| 3 handcrafted test cases | 9 structured test cases across 5 categories |
+| Single mock step for all tests | Per-test step context from `EVAL_STEPS` |
+| No failure diagnostics | Specific failure reasons per check |
+| No escalation testing | Escalation behavior validated |
+| No abuse prevention testing | Injection and oversized query tests |
+| Shared eval session → memory contamination | Isolated session per test |
+
+**What this step did NOT change:**
+- No automated CI/CD integration — regression suite is run manually for now
+- No performance benchmarking — tests validate correctness, not latency
+- No adversarial fuzzing — tests are structured, not randomized
+- No eval-driven threshold tuning — dataset informs, does not auto-optimize
+
 **Current architecture status after Phase 7:**
 
 | Capability | Status |
@@ -624,5 +713,6 @@ request_start  →  validate_request  →  is_rate_limited  →  memory  →  ca
 | Observability | Done |
 | Human escalation boundaries | Done |
 | Abuse prevention & rate limiting | Done |
+| Regression evaluation suite | Done |
 
-**Phase 7 — Productionization is now complete.** The system has transitioned from architecture experimentation to operational system engineering. The remaining frontiers are: real eval datasets, admin observability dashboards, deployment architecture, CI/CD pipelines, autoscaling, load testing, and canary evaluation.
+**Phase 7 — Productionization is now complete.** The system has transitioned from architecture experimentation to operational system engineering. The remaining frontiers are: admin observability dashboards, deployment architecture, CI/CD pipelines, autoscaling, load testing, and canary evaluation.
