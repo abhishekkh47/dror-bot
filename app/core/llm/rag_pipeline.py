@@ -1,3 +1,6 @@
+from app.core.cache.cache_keys import build_response_cache_key
+from app.core.cache.cache_policy import should_cache_response
+from app.core.cache.response_cache import get_cached_response, save_cached_response
 from app.core.llm.retriever import retrieve_context, store
 from app.core.llm.prompt import build_prompt, build_prompt_with_step
 from app.core.llm.llm import generate_response
@@ -132,6 +135,21 @@ def ask_with_context(query: str, step, session_id: str = "default"):
         
         if not session_memory:
             session_memory = SessionMemory(session_id=session_id)
+        
+        # RESPONSE CACHE CHECK
+        cache_key = build_response_cache_key(
+            query=query,
+            step=step,
+        )
+
+        cached_response = get_cached_response(
+            cache_key
+        )
+
+        if cached_response:
+            return ExecutionResult(
+                **cached_response
+            )
 
         retrieval_context = build_retrieval_context(query=query, step=step, session_memory=session_memory)
         diagnostic = retrieval_context.get("diagnostic")
@@ -346,7 +364,7 @@ def ask_with_context(query: str, step, session_id: str = "default"):
             response_mode=response_mode,
         )
 
-        return ExecutionResult(
+        execution_result = ExecutionResult(
             response=response,
             retrieval_confidence=retrieval_confidence,
             reasoning_issues=reasoning_issues,
@@ -367,6 +385,14 @@ def ask_with_context(query: str, step, session_id: str = "default"):
             reasoning_breakdown=reasoning_breakdown,
             operational_ambiguities=operational_ambiguities,
         )
+
+        if should_cache_response(execution_result):
+            save_cached_response(
+                cache_key=cache_key,
+                payload=execution_result.model_dump(),
+            )
+
+        return execution_result
     except Exception as e:
         logger.error(f"Error asking with context: {e}")
         return ExecutionResult(

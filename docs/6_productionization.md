@@ -124,11 +124,107 @@ Original values were too aggressive for production — they created retrieval dr
 - No Redis Sentinel or cluster support — single-node Redis is the starting point
 - No memory migration tooling — existing in-memory sessions are lost on upgrade (acceptable: sessions are ephemeral by nature)
 
+---
+
+## Step 6.2: Response & retrieval caching
+
+**Category:** Latency & Cost Optimization
+
+**What:** Introduced reliability-aware response caching. Repeated queries for the same step now return cached results instantly — skipping retrieval, orchestration, and LLM generation entirely. Only stable, high-confidence, conflict-free responses are cached. Unreliable, ambiguous, or degraded responses are never cached.
+
+**The problem — full pipeline recomputation on every request:**
+
+Every request triggers the entire orchestration chain: vector search → filtering → lifecycle extraction → chunk selection → distillation → reliability scoring → memory loading → prompt assembly → LLM generation → sanitization. For repeated operational questions (common in support systems), this is unnecessary compute duplication that wastes tokens, increases latency, and scales poorly under concurrency.
+
+**Key insight:** Production AI systems optimize repeated operational patterns, not merely single-query correctness. The same integration question asked by different users against the same step should not trigger separate LLM calls.
+
+**What was built:**
+
+**`app/core/cache/cache_keys.py`** — Deterministic cache key generation:
+
+```python
+raw = f"{query}|{step.id}|{step.rag_topic}"
+hashed = hashlib.md5(raw.encode()).hexdigest()
+return f"drorbot:response:{hashed}"
+```
+
+Key is scoped to `query + step.id + step.rag_topic` — same question at the same step always hits the same cache entry. Different steps or different queries always miss. Session-independent by design: operational guidance for the same step/query is identical across users.
+
+**`app/core/cache/response_cache.py`** — Redis-backed response cache:
+
+| Feature | Implementation |
+|---------|---------------|
+| Configurable TTL | `RESPONSE_CACHE_TTL_SECONDS` env var (default: 1800 = 30 min) |
+| Redis health check | `is_redis_available()` before read/write |
+| Error isolation | Connection/timeout errors caught per-operation, return `None` on failure |
+| Graceful degradation | Cache miss on Redis failure — pipeline proceeds normally |
+| JSON serialization | `ExecutionResult` serialized via `model_dump()` / `json.dumps()` |
+
+**`app/core/cache/cache_policy.py`** — Reliability-aware cache governance:
+
+A response is cacheable ONLY when ALL conditions are met:
+
+| Condition | Why |
+|-----------|-----|
+| `response_mode == "normal"` | Fallback/clarification responses should not be cached |
+| `response_reliability_score >= 75` | Low-reliability responses may change with better evidence |
+| No `operational_conflicts` | Conflicting evidence means the answer may be wrong |
+| No `operational_ambiguities` | Ambiguous state should trigger fresh investigation, not cached answers |
+
+This is **reliability-aware caching** — only stable, trustworthy operational guidance gets cached. Ambiguous troubleshooting, low-confidence retrieval, and degraded responses always trigger fresh computation.
+
+**Pipeline integration in `rag_pipeline.py`:**
+
+Cache check happens early — after memory loading but before any retrieval:
+
+```python
+cache_key = build_response_cache_key(query=query, step=step)
+cached = get_cached_response(cache_key)
+if cached:
+    return ExecutionResult(**cached)
+```
+
+Cache save happens at the end — only if the policy allows:
+
+```python
+execution_result = ExecutionResult(...)
+if should_cache_response(execution_result):
+    save_cached_response(cache_key, execution_result.model_dump())
+```
+
+**What this changes:**
+
+| Before | After |
+|--------|-------|
+| Every request = full pipeline | Repeated queries = instant cache hit |
+| Redundant LLM calls on identical questions | Single LLM call per unique query/step |
+| Latency scales linearly with requests | Repeated requests are O(1) Redis lookup |
+| Token cost scales linearly | Token cost scales with unique queries only |
+| No response persistence | Responses persist for 30 min in Redis |
+
+**What is explicitly NOT cached:**
+- Fallback responses (`response_mode != "normal"`)
+- Low-reliability responses (`response_reliability_score < 75`)
+- Responses with operational conflicts
+- Responses with operational ambiguities
+- Error/exception responses
+
+**Environment variables:**
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `RESPONSE_CACHE_TTL_SECONDS` | `1800` | Response cache expiration (seconds) |
+
+**What this step did NOT change:**
+- No retrieval-level caching — only full response caching (retrieval cache is a separate concern)
+- No cache invalidation on knowledge base updates — TTL expiration handles staleness for now
+- No cache warming or precomputation — reactive caching only
+- No per-user response variation — cache is session-independent (correct for operational guidance)
+
 **Productionization roadmap — remaining steps:**
 
 | Step | Focus | Priority |
 |------|-------|----------|
-| 6.2 | Response caching | HIGH — reduce redundant LLM calls |
 | 6.3 | Prompt size governance | HIGH — token budgeting and context truncation |
 | 6.4 | Real eval dataset | HIGH — 100-500 realistic support questions |
 | 6.5 | Observability dashboard | HIGH — metrics, rates, latency tracking |
