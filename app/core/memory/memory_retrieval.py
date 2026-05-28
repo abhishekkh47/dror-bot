@@ -27,7 +27,7 @@ def apply_memory_retrieval_boost(
             topic
             and topic in discussed_topics
         ):
-            adjusted_score += 0.20
+            adjusted_score += 0.08
 
         # Lifecycle continuity boost
         chunk_text = chunk.get("text","").lower()
@@ -38,7 +38,7 @@ def apply_memory_retrieval_boost(
             and "processing"
             in chunk_text
         ):
-            adjusted_score += 0.15
+            adjusted_score += 0.05
 
         if (
             "cancel"
@@ -46,7 +46,7 @@ def apply_memory_retrieval_boost(
             and "cancel"
             in chunk_text
         ):
-            adjusted_score += 0.15
+            adjusted_score += 0.05
 
         boosted_chunks.append((adjusted_score, chunk))
 

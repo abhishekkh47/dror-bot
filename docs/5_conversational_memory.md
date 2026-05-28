@@ -32,8 +32,8 @@ Two boosting signals:
 
 | Signal | Boost | What it does |
 |--------|-------|-------------|
-| Topic continuity | +0.20 | Chunks matching previously discussed topics rank higher |
-| Lifecycle continuity | +0.15 | Chunks containing lifecycle keywords from operational history (processing, cancellation) rank higher |
+| Topic continuity | +0.08 | Chunks matching previously discussed topics rank higher |
+| Lifecycle continuity | +0.05 | Chunks containing lifecycle keywords from operational history (processing, cancellation) rank higher |
 
 Reads from `session_memory.discussed_topics` and `session_memory.operational_history`. Re-sorts chunks by adjusted score after boosting.
 
@@ -63,7 +63,7 @@ Reads from `session_memory.discussed_topics` and `session_memory.operational_his
 **What this step did NOT change:**
 - No retrieval logic changes beyond score boosting — filtering, selection, validation all unchanged
 - Memory structure (`session_memory`) is assumed to exist — session management itself is not implemented here
-- Boost weights (0.20, 0.15) are approximate — tuning comes from eval data
+- Boost weights (0.08, 0.05) are conservative — tuning comes from eval data
 
 **Next step:** Step 5.2 — Full memory orchestration integration. Memory modules exist but are disconnected from the pipeline lifecycle — orchestration must own memory load/save/reset/update internally.
 
@@ -239,4 +239,6 @@ Each list is extended with new values then immediately normalized — deduplicat
 | Investigation reset governance | Done |
 | Memory normalization | Done |
 
-**The memory layer is now a genuinely production-grade foundation.** The next real frontiers are no longer retrieval scoring layers — they are: human escalation, observability dashboards, async orchestration, caching, production eval datasets, latency optimization, and deployment architecture.
+**The memory layer is now a genuinely production-grade foundation.** The next real frontiers are no longer retrieval scoring layers — they are: production persistence, response caching, prompt size governance, real eval datasets, observability dashboards, and human escalation governance.
+
+**Next phase:** `6_productionization.md` (Phase 7: Productionization) — the transition from architecture experimentation to operational system engineering.
