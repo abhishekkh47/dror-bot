@@ -59,6 +59,9 @@ def build_telemetry_event(
                 execution_result.selected_chunks
             ),
 
+        "human_escalation_required":
+            execution_result.human_escalation_required,
+
         "latency_ms":
             total_latency_ms,
     }

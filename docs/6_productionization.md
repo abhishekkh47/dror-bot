@@ -477,9 +477,85 @@ context = build_structured_context(...)    # build from compacted inputs
 - No dynamic budgeting based on query complexity — static limits for now
 - Lifecycle facts and response constraints are not compacted — these are small and critical
 
-**Productionization roadmap — remaining steps:**
+---
 
-| Step | Focus | Priority |
-|------|-------|----------|
-| 6.6 | Real eval dataset | HIGH — 100-500 realistic support questions |
-| 6.7 | Human escalation governance | HIGH — when to stop answering |
+## Step 6.6: Human escalation governance
+
+**Category:** Operational Safety & Escalation Control
+
+**What:** Introduced explicit escalation boundaries that detect when the AI should stop troubleshooting and delegate to human support. Escalation triggers on sensitive operational patterns (fraud, chargebacks, compliance), excessive ambiguity, or heavy operational conflicts. Escalated responses are never cached and are tracked in telemetry.
+
+**The problem — AI that always tries to answer:**
+
+The system previously assumed it should always attempt to troubleshoot, regardless of topic sensitivity. For a payments/compliance support system, this creates risk: the AI may attempt to diagnose billing disputes, explain compliance outcomes, infer account restrictions, or troubleshoot fraud-related flows using speculative reasoning. These situations require human investigation, not autonomous AI troubleshooting.
+
+**Key principle:** Trustworthy operational AI systems must know when NOT to answer. Safe delegation is more important than maximum automation.
+
+**What was built:**
+
+**`app/core/escalation/escalation_policy.py`** — `should_escalate_to_human()`:
+
+Three escalation triggers:
+
+| Trigger | Condition | Why |
+|---------|-----------|-----|
+| Sensitive patterns | Query matches any of 9 escalation patterns | Fraud, chargebacks, compliance, KYC, missing funds, unauthorized transactions — all require human investigation |
+| Excessive ambiguity | `response_reliability_score < 40` | System confidence is too low to provide trustworthy guidance |
+| Heavy conflicts | `operational_conflicts >= 2` | Multiple conflicting evidence signals — AI cannot resolve safely |
+
+Escalation patterns: `missing funds`, `money not received`, `account restricted`, `compliance review`, `kyc rejected`, `fraud`, `chargeback`, `legal issue`, `unauthorized transaction`.
+
+**`app/core/escalation/escalation_response.py`** — `build_escalation_response()`:
+
+Returns a safe, neutral escalation message directing the user to contact support with transaction details. Deliberately does not speculate about the issue or offer partial troubleshooting.
+
+**`app/core/types.py`** — `ExecutionResult` updated:
+
+Added `human_escalation_required: bool = False`. Enables downstream systems (API, telemetry, caching) to react to escalation state.
+
+**Pipeline integration in `rag_pipeline.py`:**
+
+Escalation check runs after `ExecutionResult` construction — after the full pipeline has computed all scoring signals. If triggered, the response is overridden:
+
+```python
+if should_escalate_to_human(query, execution_result):
+    execution_result.response = build_escalation_response()
+    execution_result.human_escalation_required = True
+```
+
+**Cross-cutting integration — escalation-aware caching and telemetry:**
+
+**`app/core/cache/cache_policy.py`** — Escalated responses are never cached. Without this, a fraud-related query that happens to retrieve well (high reliability, normal mode) would cache the escalation message, causing identical future queries to return the escalation response even after patterns are updated.
+
+**`app/core/observability/telemetry.py`** — `human_escalation_required` added to telemetry events. Enables monitoring escalation rate, identifying which query patterns trigger escalation most, and detecting escalation drift.
+
+**What this changes:**
+
+| Before | After |
+|--------|-------|
+| AI always attempts to answer | AI detects escalation-sensitive situations |
+| Fraud/compliance queries get speculative answers | Fraud/compliance queries trigger safe handoff |
+| Low-reliability responses still delivered | Very low reliability triggers escalation |
+| Heavy conflicts still produce responses | Multiple conflicts trigger escalation |
+| Escalation invisible to telemetry | Escalation rate trackable via telemetry |
+| Escalated responses could be cached | Escalated responses explicitly excluded from cache |
+
+**What this step did NOT change:**
+- No ticket routing or support workflow automation — escalation triggers a safe response, not a support ticket
+- No per-domain escalation tuning — all escalation patterns use the same threshold
+- No escalation cooldown or rate limiting — every matching query triggers escalation independently
+- No semantic escalation detection — pattern matching only (sufficient for known sensitive terms)
+
+**Current architecture status after Phase 7:**
+
+| Capability | Status |
+|------------|--------|
+| Stateful investigations | Done |
+| Reliability governance | Done |
+| Async orchestration | Done |
+| Production caching | Done |
+| Prompt governance | Done |
+| Observability | Done |
+| Human escalation boundaries | Done |
+
+**The productionization phase is now complete.** The system has transitioned from architecture experimentation to operational system engineering. Remaining frontiers are: real eval datasets, admin observability dashboards, abuse prevention, rate limiting, deployment pipelines, autoscaling, and load testing.

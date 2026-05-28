@@ -28,4 +28,7 @@ def should_cache_response(
     ):
         return False
 
+    if execution_result.human_escalation_required:
+        return False
+
     return True

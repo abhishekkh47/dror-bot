@@ -3,6 +3,8 @@ import time
 from app.core.cache.cache_keys import build_response_cache_key
 from app.core.cache.cache_policy import should_cache_response
 from app.core.cache.response_cache import get_cached_response, save_cached_response
+from app.core.escalation.escalation_policy import should_escalate_to_human
+from app.core.escalation.escalation_response import build_escalation_response
 from app.core.llm.prompt_compactor import compact_prompt_inputs
 from app.core.llm.retriever import retrieve_context, store
 from app.core.llm.prompt import build_prompt, build_prompt_with_step
@@ -356,6 +358,15 @@ async def ask_with_context(query: str, step, session_id: str = "default"):
             reasoning_breakdown=reasoning_breakdown,
             operational_ambiguities=operational_ambiguities,
         )
+        
+        human_escalation_required = should_escalate_to_human(
+            query=query,
+            execution_result=execution_result,
+        )
+
+        if human_escalation_required:
+            execution_result.response = build_escalation_response()
+            execution_result.human_escalation_required = True
 
         total_latency_ms = int(
             (time.time() - request_start) * 1000

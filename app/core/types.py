@@ -154,3 +154,4 @@ class ExecutionResult(BaseModel):
     evidence_attribution: dict = {}
     reasoning_breakdown: dict = {}
     operational_ambiguities: list[str] = []
+    human_escalation_required: bool = False
