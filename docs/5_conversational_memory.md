@@ -172,4 +172,71 @@ Prompt template updated with `PREVIOUS_INVESTIGATION_CONTEXT: {memory_context}` 
 - Investigation segmentation is primitive (explicit topic list) — semantic segmentation comes later
 - Memory context in prompt is formatted but not yet structured with evidence IDs
 
-**Next step:** Step 5.3 — Investigation State Summarization refinement and long-session continuity management. Operational memory continuously grows — state compression, memory distillation, and scalable memory orchestration become the next production scaling frontier.
+**Next step:** Step 5.4 — Memory Normalization & Deduplication. Operational memory continuously grows with duplicate signals — state compression and signal hygiene become the next production scaling frontier.
+
+---
+
+## Step 5.4: Memory normalization & deduplication
+
+**Category:** Operational Memory Hygiene
+
+**What:** Introduced memory normalization that deduplicates and bounds all operational memory lists after every update. Memory now preserves important operational signals without duplicate reinforcement, stale repetition, or unbounded growth. Long-running sessions no longer accumulate polluted memory.
+
+**The problem — append-only memory accumulation:**
+
+After 20 turns, memory contained:
+```
+Processing started
+Processing started
+Processing started
+Cancellation detected
+Cancellation detected
+```
+
+This creates noisy summaries, retrieval bias (over-boosting stale topics), stale reinforcement (repeating the same conclusion amplifies its influence), and memory pollution. The root cause: `memory_updater.py` used `extend(...)` without deduplication — guaranteeing infinite duplication.
+
+**Key principle:** Operational memory quality depends on **signal cleanliness**, not merely memory persistence. Enterprise systems optimize for signal preservation, not historical completeness.
+
+**What was built:**
+
+**`app/core/memory/memory_normalizer.py`** — `normalize_memory_list(values, limit=10)`:
+- Deduplicates by traversing in reverse (preserves most recent occurrence of each signal)
+- Bounds output to `limit` most recent unique entries
+- Deterministic, no embeddings, no semantic deduplication
+
+**`app/core/memory/memory_updater.py`** — Updated to normalize after every extend:
+
+| Memory list | Bound | Why |
+|-------------|-------|-----|
+| `operational_history` | 12 | Core lifecycle signals — needs enough to reconstruct chronology |
+| `inferred_conclusions` | 8 | Derived reasoning — fewer needed, over-accumulation distorts |
+| `discussed_topics` | 10 | Retrieval continuity — bounded to prevent stale topic dominance |
+
+Each list is extended with new values then immediately normalized — deduplication and bounding happen in the same update pass.
+
+**What this changes:**
+
+| Before | After |
+|--------|-------|
+| Memory = unbounded historical accumulation | Memory = bounded operational state |
+| Duplicate signals reinforce indefinitely | Each signal appears once |
+| Long sessions degrade memory quality | Long sessions maintain signal clarity |
+| Stale topics dominate retrieval boosting | Topic list bounded and deduplicated |
+
+**Important — signal preservation, not aggressive trimming:**
+- Do NOT aggressively trim lifecycle state or remove important operational transitions
+- Limits (12, 8, 10) are generous enough to preserve investigation context
+- Optimizing memory signal quality, not minimal memory size
+
+**Current memory layer status after this step:**
+
+| Capability | Status |
+|------------|--------|
+| Stateful operational memory | Done |
+| Investigation continuity | Done |
+| Memory-aware retrieval | Done |
+| Investigation summarization | Done |
+| Investigation reset governance | Done |
+| Memory normalization | Done |
+
+**The memory layer is now a genuinely production-grade foundation.** The next real frontiers are no longer retrieval scoring layers — they are: human escalation, observability dashboards, async orchestration, caching, production eval datasets, latency optimization, and deployment architecture.
