@@ -3,6 +3,7 @@ import time
 from app.core.cache.cache_keys import build_response_cache_key
 from app.core.cache.cache_policy import should_cache_response
 from app.core.cache.response_cache import get_cached_response, save_cached_response
+from app.core.llm.prompt_compactor import compact_prompt_inputs
 from app.core.llm.retriever import retrieve_context, store
 from app.core.llm.prompt import build_prompt, build_prompt_with_step
 from app.core.llm.llm import generate_response
@@ -229,6 +230,17 @@ async def ask_with_context(query: str, step, session_id: str = "default"):
             selected_chunks=selected_chunks,
         )
 
+        memory_summary = session_memory.investigation_summary
+
+        compacted = compact_prompt_inputs(
+            distilled_chunks=distilled_chunks,
+            operational_evidence=operational_evidence,
+            memory_summary=memory_summary,
+        )
+        distilled_chunks = compacted["distilled_chunks"]
+        operational_evidence = compacted["operational_evidence"]
+        memory_summary = compacted["memory_summary"]
+
         context = build_structured_context(
             context_chunks=distilled_chunks,
             operational_evidence=operational_evidence,
@@ -244,8 +256,6 @@ async def ask_with_context(query: str, step, session_id: str = "default"):
 
         response_intent = detect_response_intent(query)
         response_pattern = RESPONSE_PATTERNS.get(response_intent, "")
-
-        memory_summary = session_memory.investigation_summary
 
         memory_context = (
             f"Lifecycle States: "

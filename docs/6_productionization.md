@@ -411,10 +411,75 @@ Non-critical writes no longer block response delivery.
 - No connection pool tuning beyond defaults — Redis async pool handles this automatically
 - Backgrounded tasks may fail silently — acceptable for telemetry/cache; memory save failures degrade gracefully via the existing fallback store
 
+---
+
+## Step 6.5: Prompt compaction & token governance
+
+**Category:** Prompt Efficiency Engineering
+
+**What:** Introduced deterministic prompt compaction that bounds all prompt inputs before context assembly. Chunks, operational evidence, and memory findings are now truncated to configurable limits, preventing unbounded prompt growth as features accumulate.
+
+**The problem — accumulation-driven prompt architecture:**
+
+The prompt currently injects: lifecycle rules, operational evidence, memory context, distilled chunks, response constraints, response patterns, confidence policy, and lifecycle timeline. Each feature adds more context. Without governance, prompts grow monotonically — eventually causing:
+
+- Token budget overruns and increased latency
+- Context dilution (model loses focus on high-signal evidence)
+- Higher hallucination rates (more noise for the model to filter)
+- Escalating API costs
+
+**Key principle:** Prompt quality depends on signal density, not maximum context size. Past a certain point, bigger prompts reduce reasoning quality.
+
+**What was built:**
+
+**`app/core/llm/prompt_budget.py`** — Configurable prompt limits:
+
+| Constant | Value | What it bounds |
+|----------|-------|---------------|
+| `MAX_CONTEXT_CHUNKS` | 5 | Distilled evidence chunks in the prompt |
+| `MAX_OPERATIONAL_EVIDENCE` | 5 | Operational evidence statements |
+| `MAX_MEMORY_FINDINGS` | 3 | Investigation findings from memory |
+
+**`app/core/llm/prompt_compactor.py`** — `compact_prompt_inputs()`:
+
+Takes distilled chunks, operational evidence, and memory summary. Returns bounded versions:
+- Chunks truncated to top `MAX_CONTEXT_CHUNKS` (already ranked by relevance from retrieval)
+- Evidence truncated to top `MAX_OPERATIONAL_EVIDENCE`
+- Memory summary fields individually bounded (`active_lifecycle_states[:3]`, `major_operational_findings[:MAX_MEMORY_FINDINGS]`, `active_topics[:3]`)
+
+Deterministic truncation, not semantic compression. Relies on upstream ranking to ensure the highest-signal items are at the front.
+
+**Pipeline integration — ordering fix:**
+
+Compaction now runs **before** `build_structured_context()`, not after. The structured context block sent to the prompt uses compacted inputs:
+
+```
+compacted = compact_prompt_inputs(...)     # bound the inputs
+distilled_chunks = compacted[...]          # reassign to compacted
+operational_evidence = compacted[...]
+memory_summary = compacted[...]
+context = build_structured_context(...)    # build from compacted inputs
+```
+
+**What this changes:**
+
+| Before | After |
+|--------|-------|
+| All retrieved chunks injected into prompt | Top 5 chunks only |
+| All operational evidence injected | Top 5 evidence statements only |
+| Full memory summary injected | Bounded to 3 findings, 3 states, 3 topics |
+| Prompt size grows with every feature | Prompt size bounded by budget constants |
+| No governance over prompt inputs | Configurable limits per input type |
+
+**What this step did NOT change:**
+- No token counting yet — limits are item-count-based, not token-based (sufficient for current prompt sizes)
+- No semantic compression — simple truncation relies on upstream relevance ranking
+- No dynamic budgeting based on query complexity — static limits for now
+- Lifecycle facts and response constraints are not compacted — these are small and critical
+
 **Productionization roadmap — remaining steps:**
 
 | Step | Focus | Priority |
 |------|-------|----------|
-| 6.5 | Prompt size governance | HIGH — token budgeting and context truncation |
 | 6.6 | Real eval dataset | HIGH — 100-500 realistic support questions |
 | 6.7 | Human escalation governance | HIGH — when to stop answering |
