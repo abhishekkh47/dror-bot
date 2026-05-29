@@ -1,6 +1,20 @@
+import os
 from app.core.llm.vector_store import VectorStore
 
-store = VectorStore("app/data/rag/rag_chunks_create_intent.json")
+KNOWLEDGE_FILES = [
+    "app/data/rag/rag_chunks_create_intent.json",
+    "app/data/knowledge_base/authentication.json",
+    "app/data/knowledge_base/platform_setup.json",
+    "app/data/knowledge_base/transactions.json",
+    "app/data/knowledge_base/webhooks.json",
+    "app/data/knowledge_base/sockets.json",
+    "app/data/knowledge_base/refunds.json",
+    "app/data/knowledge_base/disputes.json",
+    "app/data/knowledge_base/troubleshooting.json",
+]
+
+existing_files = [f for f in KNOWLEDGE_FILES if os.path.exists(f)]
+store = VectorStore(existing_files)
 
 def retrieve_context(query: str, rag_topic: str = None):
     results = store.search(query, top_k=8)

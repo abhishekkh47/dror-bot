@@ -5,14 +5,19 @@ from app.utils.constants import CONTEXT_TAGS, CRITICAL_TAGS, INTENT_DEFINITIONS,
 import re
 
 class VectorStore:
-    def __init__(self, path: str):
-        with open(path, "r") as f:
-            """
-            json.load() → reads from file object
-            json.loads() → parses string
-            """
-            # self.chunks = json.loads(f)
-            self.chunks = json.load(f)
+    def __init__(self, path: str | list[str]):
+        if isinstance(path, str):
+            path = [path]
+        
+        self.chunks = []
+        for p in path:
+            with open(p, "r") as f:
+                """
+                json.load() → reads from file object
+                json.loads() → parses string
+                """
+                # self.chunks = json.loads(f)
+                self.chunks.extend(json.load(f))
         
         self.vectors = []
         self._build_index()
