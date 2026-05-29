@@ -155,3 +155,13 @@ class ExecutionResult(BaseModel):
     reasoning_breakdown: dict = {}
     operational_ambiguities: list[str] = []
     human_escalation_required: bool = False
+
+class QueryRequest(BaseModel):
+    query: str
+    session_id: str = "default"
+
+class QueryResponse(BaseModel):
+    answer: str
+    domain: str
+    mode: str
+    confidence: float = 0.0

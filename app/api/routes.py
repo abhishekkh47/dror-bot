@@ -1,8 +1,10 @@
 from fastapi import APIRouter
 from app.core.flow_engine import FlowEngine
 from app.core.flow_loader import FlowLoader
+from app.core.llm.qa_pipeline import answer_query
 from app.core.session_store import SessionStore
 from app.core.llm.rag_pipeline import ask_with_context
+from app.core.types import QueryRequest, QueryResponse
 
 router = APIRouter()
 
@@ -31,3 +33,7 @@ async def process_input(session_id: str, user_input: str):
         return { "step": step, "response": result.response }
     except Exception as e:
         return { "error": str(e) }
+    
+@router.post("/query", response_model=QueryResponse)
+async def query(request: QueryRequest):
+    return await answer_query(query=request.query, session_id=request.session_id)
