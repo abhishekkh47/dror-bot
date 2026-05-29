@@ -1,0 +1,10 @@
+[
+    {
+      "id": "disputes_overview",
+      "topic": "disputes_overview",
+      "type": "explanation",
+      "tags": ["dispute", "create", "list", "status", "resolution", "admin"],
+      "importance": "medium",
+      "content": "Disputes allow platforms to flag problematic transactions for review by DrorPay admins.\n\nEndpoints (all require the three auth headers):\n- POST /platform/v1/disputes — create a dispute for a transaction\n- GET  /platform/v1/disputes — list all disputes for the platform\n- GET  /platform/v1/disputes/:dispute_id — get a specific dispute\n\nKey constraints:\n- Only DrorPay admins can update dispute status. Platforms cannot close or resolve disputes themselves.\n- Admin update: PUT /admin/disputes/:dispute_id/status — this is an admin-only endpoint.\n- Disputes do NOT automatically trigger refunds. A dispute and a refund are separate processes. Raising a dispute does not initiate any money movement.\n- Platforms create disputes; DrorPay admins investigate and resolve them."
+    }
+  ]

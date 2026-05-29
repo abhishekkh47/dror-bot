@@ -1,0 +1,26 @@
+[
+    {
+      "id": "sockets_connection_setup",
+      "topic": "sockets_connection_setup",
+      "type": "api_spec",
+      "tags": ["socket", "connection", "setup", "websocket", "socketio", "join"],
+      "importance": "high",
+      "content": "Connect to DrorPay using Socket.IO:\n```js\nconst io = require('socket.io-client');\nconst socket = io('ws://your-drorpay-server.com');\n```\n\nRecommended flow — join the payment room BEFORE creating the payment intent:\n```js\nsocket.emit('join-payment-room', {\n  platform_order_id: 'your-order-123',\n  platform_id: 'your-platform-uuid'\n});\n\nsocket.on('payment-room-joined', (data) => {\n  console.log('Room joined for:', data.platform_order_id);\n  // Now call create-intent — no race condition possible\n  createPaymentIntent();\n});\n```\n\nWhy join first: the current implementation auto-completes payments immediately after creation. If you join after the API call, the payment may complete before your socket listener is active."
+    },
+    {
+      "id": "sockets_events_received",
+      "topic": "sockets_events_received",
+      "type": "api_spec",
+      "tags": ["socket", "events", "payment-status-update", "payment-completed", "payment-failed", "payment-cancelled"],
+      "importance": "high",
+      "content": "Events emitted by DrorPay to your socket connection:\n\n- payment-room-joined: Confirmation your room join succeeded.\n  Payload: { platform_order_id }\n\n- payment-status-update: Any status change.\n  Payload: { platform_transaction_id, status, platform_order_id, amount, message, timestamp }\n\n- payment-completed: Payment succeeded.\n  Payload adds: fee_paid, platform_charges, transaction_id, reference_id\n\n- payment-failed: Payment failed.\n  Payload adds: error message\n\n- payment-cancelled: Payment cancelled.\n  Payload: { platform_transaction_id, status: 'cancelled', platform_order_id, amount, message, timestamp }\n\n- join-payment-error: Room join failed.\n  Payload: { message }\n\nTo leave a room: socket.emit('leave-payment-room', { platform_order_id: 'order-123' })"
+    },
+    {
+      "id": "sockets_join_options",
+      "topic": "sockets_join_options",
+      "type": "explanation",
+      "tags": ["socket", "join", "platform_order_id", "platform_transaction_id", "room"],
+      "importance": "medium",
+      "content": "Two ways to join a payment room:\n\nOption 1 (recommended): Use platform_order_id BEFORE creating the intent\n```js\nsocket.emit('join-payment-room', {\n  platform_order_id: 'your-order-123',\n  platform_id: 'your-platform-uuid'\n});\n```\nThis is recommended because it eliminates the race condition — the socket room is ready before the payment is created.\n\nOption 2: Use platform_transaction_id AFTER creating the intent\n```js\nsocket.emit('join-payment-room', {\n  platform_transaction_id: 'uuid-from-create-intent-response',\n  platform_id: 'your-platform-uuid'\n});\n```\nRisk: the payment may auto-complete before you join, causing you to miss the events."
+    }
+]

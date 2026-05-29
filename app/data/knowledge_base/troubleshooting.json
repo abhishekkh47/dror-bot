@@ -1,0 +1,42 @@
+[
+    {
+      "id": "trouble_payment_immediately_cancelled",
+      "topic": "troubleshooting_payment_immediately_cancelled",
+      "type": "troubleshooting",
+      "tags": ["troubleshooting", "cancelled", "auto_completion", "failure", "balance"],
+      "importance": "high",
+      "content": "Problem: Payment is created but immediately gets cancelled.\nRoot cause: Auto-completion failed before the user ever sees the request.\n\nMost common causes:\n1. Sender has insufficient wallet balance (balance < amount)\n2. Sender wallet is inactive or frozen\n3. Receiver wallet is inactive\n4. Platform wallet does not exist or is inactive\n\nDiagnosis: Check the payment.cancelled webhook or socket event payload for an error message. The webhook additional_data.reason field may indicate the cause.\n\nResolution: Verify the sender has sufficient balance before calling create-intent. Confirm all wallets (sender, receiver, platform) are active in DrorPay. Contact DrorPay support if wallets are unexpectedly inactive."
+    },
+    {
+      "id": "trouble_webhook_not_received",
+      "topic": "troubleshooting_webhook_not_received",
+      "type": "troubleshooting",
+      "tags": ["troubleshooting", "webhook", "not_received", "callback_url", "firewall"],
+      "importance": "high",
+      "content": "Problem: Webhooks are not being received.\n\nDiagnosis checklist:\n1. Is your payment_callback_url publicly accessible from the internet? (localhost URLs will never receive webhooks)\n2. Is port 443 or 80 open for inbound HTTP/HTTPS requests?\n3. Run POST /admin/platform/test-webhook to test delivery right now\n4. Check your server logs for any incoming requests from DrorPay\n5. Is your endpoint returning HTTP 200-299? Returning 5xx triggers retries; returning 4xx stops retries\n6. Did you set payment_callback_url when creating/updating the platform? If omitted, no webhooks are sent"
+    },
+    {
+      "id": "trouble_signature_verification_fails",
+      "topic": "troubleshooting_signature_verification_fails",
+      "type": "troubleshooting",
+      "tags": ["troubleshooting", "signature", "verification", "webhook", "hmac"],
+      "importance": "high",
+      "content": "Problem: Webhook signature verification fails.\n\nCommon causes:\n1. Payload modified before hashing — use JSON.stringify(req.body) directly. Do not modify the object, parse it again, or re-serialize it. Any change to key ordering breaks the HMAC.\n2. Wrong secret — use the exact raw secret string returned at generation time. Do not URL-encode, base64, or hash it before using in verification.\n3. Secret mismatch — the secret you're verifying against must match what DrorPay has stored for your platform. If the admin regenerated the secret, the old one is invalid.\n4. Missing raw body — some frameworks parse the body before your middleware runs. You need the raw body bytes or the exact parsed JSON used to compute JSON.stringify(req.body)."
+    },
+    {
+      "id": "trouble_p2p_not_allowed",
+      "topic": "troubleshooting_p2p_transaction_not_allowed",
+      "type": "troubleshooting",
+      "tags": ["troubleshooting", "p2p", "business", "receiver", "error", "business_rule"],
+      "importance": "medium",
+      "content": "Error: 'P2P transaction not allowed'\n\nCause: The receiver_platform_user_id refers to a platform user without an associated business_id. Platform transactions can only route payments to business accounts — individual-to-individual transfers are blocked at the platform API level.\n\nResolution:\n1. The receiving merchant must be onboarded as a business account in DrorPay\n2. Their platform_users record must have a business_id set\n3. Contact the DrorPay admin to verify or update the receiver's business association\n4. Once the business association is confirmed, retry the create-intent call with the same receiver_platform_user_id"
+    },
+    {
+      "id": "trouble_auth_common_errors",
+      "topic": "troubleshooting_auth_common_errors",
+      "type": "troubleshooting",
+      "tags": ["troubleshooting", "authentication", "401", "headers", "error"],
+      "importance": "high",
+      "content": "Authentication troubleshooting (HTTP 401 errors):\n\n'Please authenticate' — one of the three required headers is missing or the JWT is malformed/expired.\n'Platform authentication required' — X-Platform-Code or X-Platform-Secret is incorrect or missing.\n'User phone not verified' — the platform user must complete phone verification in DrorPay before using the API.\n'User KYC not verified' — the platform user must complete identity verification in DrorPay.\n\nDebugging steps:\n1. Confirm all three headers are present: Authorization, X-Platform-Secret, X-Platform-Code\n2. Check JWT expiration — regenerate if expired\n3. Confirm X-Platform-Code exactly matches the platform slug (case-sensitive)\n4. Confirm X-Platform-Secret is the raw secret from generation time, unchanged\n5. Check that the platform user has completed both phone and KYC verification in the DrorPay app"
+    }
+]

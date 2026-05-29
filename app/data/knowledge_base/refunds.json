@@ -1,0 +1,26 @@
+[
+    {
+      "id": "refunds_endpoint",
+      "topic": "refunds_cancel_and_refund_endpoint",
+      "type": "api_spec",
+      "tags": ["refund", "cancel", "endpoint", "request", "partial", "full"],
+      "importance": "high",
+      "content": "Cancel and Refund: POST /platform/v1/cancel-and-refund\n\nSame three auth headers required.\n\nRequest body:\n- platform_transaction_id (UUID, required): The transaction to refund. Must belong to the authenticated platform and user.\n- platform_transaction_detail_ids (array of UUIDs, required, min 1 item): The line items to refund.\n\nFor full refund: pass ALL detail IDs from the original transaction.\nFor partial refund: pass only the subset of detail IDs to refund.\n\nSuccess response:\n{ \"refund_transaction_id\": \"<uuid>\", \"total_refund_amount\": <number>, \"refunded_items\": <count> }\n\nYou cannot specify a custom refund amount per item — each selected item is refunded in full (minus fees and platform charges)."
+    },
+    {
+      "id": "refunds_amount_calculation",
+      "topic": "refunds_amount_calculation",
+      "type": "rules",
+      "tags": ["refund", "amount", "fees", "calculation", "platform_charges"],
+      "importance": "medium",
+      "content": "Refund amount calculation per line item:\nrefundable_amount = detail.amount - detail.fee_paid - detail.platform_charges\n\nFees and platform charges are NOT refunded. The total refund is the sum of all selected items' refundable amounts.\n\nConstraints:\n- A detail can only be refunded ONCE. Attempting to re-refund a detail fails the ENTIRE request — even if other detail IDs in the same request are valid.\n- Track which platform_transaction_detail_ids have been refunded to avoid double-refund attempts.\n- Use GET /platform/v1/transaction-details/:id to check which details still have refunded_platform_transaction_id: null (those are refundable)."
+    },
+    {
+      "id": "refunds_what_happens",
+      "topic": "refunds_what_happens_during_refund",
+      "type": "explanation",
+      "tags": ["refund", "wallet", "credit", "notification"],
+      "importance": "medium",
+      "content": "What happens during a successful refund:\n1. New platform transaction created with type 'refund' and status 'completed'\n2. Original detail records marked with the refund transaction ID\n3. Receiver wallet hold_amount reduced by refund amount\n4. Sender wallet balance increased by refund amount\n5. Receiver platform user balance_amount reduced\n6. FCM push notification sent to sender: 'Refund Credited'\n7. WhatsApp notification sent to sender\n8. Audit event logged\n\nNo fees are charged on refunds (fee_paid: 0, platform_charges: 0). The refund_transaction_id from the response should be stored on your side for tracking."
+    }
+]

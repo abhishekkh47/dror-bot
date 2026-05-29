@@ -1,0 +1,34 @@
+[
+    {
+      "id": "webhooks_overview",
+      "topic": "webhooks_overview",
+      "type": "explanation",
+      "tags": ["webhook", "callback", "events", "payment_callback_url"],
+      "importance": "high",
+      "content": "DrorPay sends HTTP POST requests to your configured payment_callback_url for payment lifecycle events.\n\nEvents sent:\n- payment.created: Intent was created (status: pending)\n- payment.completed: Payment succeeded (status: completed)\n- payment.failed: Payment failed (status: failed)\n- payment.cancelled: Payment was cancelled (status: cancelled)\n- payment.test: Sent by POST /admin/platform/test-webhook for integration testing\n\nAll webhook payloads include: event, platform_transaction_id, platform_order_id, status, amount, fee_paid, platform_charges, timestamp, additional_data.\n\nWebhooks are your primary backup for socket events. Implement idempotency — you may receive duplicate notifications from both socket and webhook channels for the same event."
+    },
+    {
+      "id": "webhooks_signature_verification",
+      "topic": "webhooks_signature_verification",
+      "type": "rules",
+      "tags": ["webhook", "security", "signature", "hmac", "verification", "x-drorpay-signature"],
+      "importance": "high",
+      "content": "DrorPay includes a signature header when your platform has a secret configured:\nX-DrorPay-Signature: sha256=<hmac_signature>\n\nVerification (Node.js):\n```js\nconst crypto = require('crypto');\nfunction verifyWebhookSignature(payload, signature, secret) {\n  const expected = crypto\n    .createHmac('sha256', secret)\n    .update(JSON.stringify(payload))\n    .digest('hex');\n  return `sha256=${expected}` === signature;\n}\n```\n\nCritical: use JSON.stringify(req.body) exactly — do NOT re-parse or re-serialize the payload object. The signature is computed over the exact bytes sent. Verify the signature BEFORE processing any payload content."
+    },
+    {
+      "id": "webhooks_retry_logic",
+      "topic": "webhooks_retry_logic",
+      "type": "rules",
+      "tags": ["webhook", "retry", "backoff", "failure", "reliability"],
+      "importance": "medium",
+      "content": "Webhook retry behavior:\n- Retry attempts: up to 3\n- Retry delays: 2s, 4s, 8s (exponential backoff)\n- Success criteria: HTTP 2xx response from your endpoint\n- No retry on HTTP 4xx (DrorPay treats 4xx as client-side misconfiguration)\n- Timeout per attempt: 30 seconds\n\nBest practice: return HTTP 200 immediately and process the event asynchronously. Long synchronous processing risks hitting the 30-second timeout, which triggers retries.\n\nIf your endpoint is down during all retry attempts, use the polling endpoint GET /platform/v1/transaction-details/:id to recover the final transaction state."
+    },
+    {
+      "id": "webhooks_test_endpoint",
+      "topic": "webhooks_test_endpoint",
+      "type": "api_spec",
+      "tags": ["webhook", "test", "admin", "verification", "payment_callback_url"],
+      "importance": "medium",
+      "content": "Test webhook integration (admin only): POST /admin/platform/test-webhook\n\nRequest body: { \"platformId\": \"<uuid>\" }\n\nDrorPay sends a test payload with event 'payment.test' to your configured payment_callback_url.\n\nResponse:\n{ \"success\": true, \"status_code\": 200, \"response_data\": {}, \"webhook_url\": \"...\", \"timestamp\": \"...\" }\n\nUse this during development to:\n- Confirm your endpoint is publicly reachable\n- Verify your payload parsing works correctly\n- Test your signature verification logic\n\nThe test payload includes: event, platform_transaction_id ('test-transaction-id'), platform_order_id ('test-order-id'), status ('test'), amount (100.00), and additional_data.test: true."
+    }
+]
