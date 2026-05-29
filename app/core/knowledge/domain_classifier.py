@@ -1,4 +1,18 @@
+"""
+Domain classifier for DrorPay queries.
+
+When PROVIDER supports JSON mode (openai, gemini, ollama with format=json),
+the LLM returns {"domain": "<name>"} — no substring parsing needed.
+When JSON parsing fails, falls back to text-based matching.
+
+Fast path: queries with no DrorPay signal words are classified as
+'out_of_scope' immediately without an LLM call.
+"""
+import json
+import os
 from app.core.llm.llm import generate_response
+
+PROVIDER = os.getenv("PROVIDER", "ollama").lower()
 
 CLASSIFICATION_PROMPT = """You are a DrorPay query classifier.
 
@@ -16,15 +30,15 @@ Classify the user query into exactly ONE of these domains:
 
 User query: {query}
 
-Respond with ONLY the domain name, nothing else. No explanation."""
+Respond with valid JSON only: {{"domain": "<domain_name>"}}"""
 
 VALID_DOMAINS = {
     "authentication", "platform_setup", "transactions", "webhooks",
     "sockets", "refunds", "disputes", "troubleshooting", "out_of_scope",
 }
 
-# Minimum signal words that indicate a query is DrorPay-related.
-# If NONE of these appear in the query, skip the LLM call and return out_of_scope immediately.
+# Minimum signal words that indicate a DrorPay-related query.
+# If NONE appear, skip the LLM call entirely.
 _DRORPAY_SIGNAL_WORDS = {
     "drorpay", "platform", "payment", "webhook", "socket", "jwt", "token",
     "intent", "refund", "dispute", "transaction", "authentication", "auth",
@@ -35,40 +49,60 @@ _DRORPAY_SIGNAL_WORDS = {
 
 
 def _has_drorpay_signal(query: str) -> bool:
-    """Return True if the query contains at least one DrorPay-related term."""
-    words = set(query.lower().split())
-    # Also check raw string for hyphenated terms like "create-intent"
-    return bool(words & _DRORPAY_SIGNAL_WORDS) or any(
-        term in query.lower() for term in ("create-intent", "x-platform", "x-drorpay")
-    )
+    # Use substring matching so punctuation (e.g. "payment?") never blocks a match.
+    q = query.lower()
+    return any(word in q for word in _DRORPAY_SIGNAL_WORDS)
+
+
+def _parse_domain(raw: str) -> str | None:
+    """
+    Try JSON parse first, then fall back to substring matching.
+    Returns a valid domain name or None.
+    """
+    raw = raw.strip()
+
+    # JSON parse (works for all providers when json_mode=True)
+    try:
+        data = json.loads(raw)
+        domain = str(data.get("domain", "")).strip().lower()
+        if domain in VALID_DOMAINS:
+            return domain
+    except (json.JSONDecodeError, AttributeError):
+        pass
+
+    # Text fallback — exact match
+    lower = raw.lower()
+    if lower in VALID_DOMAINS:
+        return lower
+
+    # Text fallback — substring match
+    for domain in VALID_DOMAINS:
+        if domain in lower:
+            return domain
+
+    return None
 
 
 def classify_query_domain(query: str) -> str:
     """
     Classify a user query into a DrorPay knowledge domain.
 
-    Fast path: if the query contains no DrorPay signal words, return
-    'out_of_scope' immediately without an LLM call.
-
-    Slow path: call gemma:2b with a focused classification prompt.
-    If the query passed the keyword pre-check, we never return 'out_of_scope'
-    from the LLM — the keyword check is the authoritative scope gate.
-    Falls back to 'transactions' if the LLM returns ambiguous output.
+    Fast path: no DrorPay signal words → 'out_of_scope' without LLM call.
+    Slow path: LLM call with JSON mode for reliable structured output.
+    Safety: if query has DrorPay signal but LLM returns 'out_of_scope',
+            we trust the keyword check and default to 'transactions'.
     """
     if not _has_drorpay_signal(query):
         return "out_of_scope"
 
     prompt = CLASSIFICATION_PROMPT.format(query=query.strip())
-    raw = generate_response(prompt).strip().lower()
 
-    # Exact match — skip out_of_scope because query already passed keyword check
-    if raw in VALID_DOMAINS and raw != "out_of_scope":
-        return raw
+    # All providers now support JSON mode
+    raw = generate_response(prompt, json_mode=True)
+    domain = _parse_domain(raw)
 
-    # Substring match — handles verbose model output; skip out_of_scope
-    for domain in VALID_DOMAINS:
-        if domain in raw and domain != "out_of_scope":
-            return domain
+    if domain and domain != "out_of_scope":
+        return domain
 
-    # Default to transactions (most common developer query type)
+    # Query passed keyword check — never let LLM override to out_of_scope
     return "transactions"
