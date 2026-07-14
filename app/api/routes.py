@@ -10,6 +10,7 @@ from app.core.types import QueryRequest, QueryResponse
 
 from pydantic import BaseModel
 from app.core.rag.ingestion_service import process_markdown_files
+from app.core.security.pii_redactor import redact_pii
 
 router = APIRouter()
 
@@ -57,7 +58,8 @@ async def process_input(session_id: str, user_input: str):
 @router.post("/query", response_model=QueryResponse)
 async def query(request: QueryRequest):
     """Standard (non-streaming) QA endpoint. Returns complete answer as JSON."""
-    return await answer_query(query=request.query, session_id=request.session_id, session_store=session_store)
+    safe_query = redact_pii(request.query)
+    return await answer_query(query=safe_query, session_id=request.session_id, session_store=session_store)
 
 
 @router.post("/query/stream")
@@ -76,8 +78,10 @@ async def query_stream(request: QueryRequest):
           -H "Content-Type: application/json" \\
           -d '{"query": "how do I verify webhook signatures?"}'
     """
+    safe_query = redact_pii(request.query)
+    
     async def event_generator():
-        async for token in stream_query(request.query, session_id=request.session_id, session_store=session_store):
+        async for token in stream_query(safe_query, session_id=request.session_id, session_store=session_store):
             # SSE format: each event is "data: <payload>\n\n"
             yield f"data: {json.dumps({'token': token})}\n\n"
         yield "data: [DONE]\n\n"
