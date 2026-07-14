@@ -38,11 +38,12 @@ class SourceCitation(BaseModel):
 
 class QueryRequest(BaseModel):
     query: str
-    session_id: str = "default"
+    session_id: Optional[str] = None
 
 class QueryResponse(BaseModel):
     answer: str
     domain: str
     mode: str
+    session_id: str
     confidence: float = 0.0
     citations: List[SourceCitation] = []

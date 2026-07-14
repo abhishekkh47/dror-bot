@@ -60,7 +60,14 @@ async def start_session():
 async def query(request: QueryRequest):
     """Standard (non-streaming) QA endpoint. Returns complete answer as JSON."""
     safe_query = redact_pii(request.query)
-    return await answer_query(query=safe_query, session_id=request.session_id, session_store=session_store)
+    session_id = request.session_id
+    if not session_id:
+        session = session_store.create_qa_session()
+        session_id = session.session_id
+        
+    response = await answer_query(query=safe_query, session_id=session_id, session_store=session_store)
+    response.session_id = session_id
+    return response
 
 
 @router.post("/query/stream")
@@ -80,9 +87,14 @@ async def query_stream(request: QueryRequest):
           -d '{"query": "how do I verify webhook signatures?"}'
     """
     safe_query = redact_pii(request.query)
-    
+    session_id = request.session_id
+    if not session_id:
+        session = session_store.create_qa_session()
+        session_id = session.session_id
+        
     async def event_generator():
-        async for token in stream_query(safe_query, session_id=request.session_id, session_store=session_store):
+        # Pass the guaranteed session_id down to the stream
+        async for token in stream_query(safe_query, session_id=session_id, session_store=session_store):
             # SSE format: each event is "data: <payload>\n\n"
             yield f"data: {json.dumps({'token': token})}\n\n"
         yield "data: [DONE]\n\n"
@@ -93,5 +105,6 @@ async def query_stream(request: QueryRequest):
         headers={
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",   # disables nginx buffering in production
+            "X-Session-ID": session_id,  # Expose generated session ID in headers
         },
     )
