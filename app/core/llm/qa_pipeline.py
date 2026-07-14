@@ -39,10 +39,21 @@ QUESTION: {query}
 
 ANSWER:"""
 
-NO_CONTEXT_RESPONSE = (
-    "I don't have specific documentation for that query in my current knowledge base. "
-    "Please refer to the DrorPay integration documentation or contact the DrorPay support team."
-)
+REFORMULATE_PROMPT = """Given the following conversation history and a follow-up query, rephrase the follow-up query to be a standalone query that can be used to search a knowledge base.
+Do not answer the query, just rewrite it. If the query is already standalone, return it as is.
+
+CONVERSATION HISTORY:
+{history}
+
+FOLLOW-UP QUERY: {query}
+
+STANDALONE QUERY:"""
+
+FALLBACK_PROMPT = """A developer asked a question about DrorPay but our knowledge base did not contain the answer. 
+Write a brief, polite response acknowledging the specific question they asked, explaining we lack documentation on it, and suggesting they contact support or check the main API docs.
+Keep it under 3 sentences.
+
+QUESTION: {query}"""
 
 async def answer_query(query: str, session_id: str = "default", session_store: SessionStore = None) -> QueryResponse:
     """
@@ -64,7 +75,22 @@ async def answer_query(query: str, session_id: str = "default", session_store: S
             confidence=0.0,
         )
     
-    domain = classify_query_domain(query)
+    history_text = "No previous conversation."
+    session = None
+    if session_store:
+        try:
+            session = session_store.get(session_id)
+        except Exception:
+            session = session_store.create_qa_session(session_id)
+        if session.history:
+            history_text = "\n".join(session.history[-6:])
+
+    search_query = query
+    if session and session.history:
+        reformulated = generate_response(REFORMULATE_PROMPT.format(history=history_text, query=query)).strip()
+        search_query = reformulated if reformulated else query
+    
+    domain = classify_query_domain(search_query)
 
     allowed, reason = enforce_drorpay_scope(domain)
     if not allowed:
@@ -77,11 +103,12 @@ async def answer_query(query: str, session_id: str = "default", session_store: S
 
     virtual_step = build_virtual_step(domain)
 
-    scored_chunks = store.search(query, step=virtual_step, top_k=6)
+    scored_chunks = store.search(search_query, step=virtual_step, top_k=6)
 
     if not scored_chunks:
+        fallback_msg = generate_response(FALLBACK_PROMPT.format(query=query)).strip()
         return QueryResponse(
-            answer=NO_CONTEXT_RESPONSE,
+            answer=fallback_msg,
             domain=domain,
             mode="no_context",
             confidence=0.0,
@@ -95,21 +122,14 @@ async def answer_query(query: str, session_id: str = "default", session_store: S
     top_chunks = [chunk for score, chunk in top_scored_chunks]
 
     context = "\n\n".join([
-        f"[{c['topic']}]\n{c['content']}"
+        f"[TOPIC: {c.get('topic', 'N/A')}]\n"
+        f"[CAPABILITY: {c.get('metadata', {}).get('capability', 'general')}]\n"
+        f"[LIFECYCLE: {c.get('metadata', {}).get('lifecycle_stage', 'general')}]\n"
+        f"{c['content']}"
         for c in top_chunks
     ])
 
     confidence = float(scored_chunks[0][0]) if scored_chunks else 0.0
-
-    history_text = "No previous conversation."
-    session = None
-    if session_store:
-        try:
-            session = session_store.get(session_id)
-        except Exception:
-            session = session_store.create_qa_session(session_id)
-        if session.history:
-            history_text = "\n".join(session.history[-6:])
 
     prompt = QA_SYSTEM_PROMPT.format(
         domain=domain,
@@ -153,28 +173,6 @@ def _build_qa_prompt(query: str, session_id: str = "default", session_store: Ses
     if not is_valid:
         return validation_error, "", 0.0, None
 
-    domain = classify_query_domain(query)
-
-    allowed, reason = enforce_drorpay_scope(domain)
-    if not allowed:
-        return reason, "", 0.0, None
-
-    virtual_step = build_virtual_step(domain)
-    scored_chunks = store.search(query, step=virtual_step, top_k=6)
-
-    if not scored_chunks:
-        return NO_CONTEXT_RESPONSE, "", 0.0, None
-
-    top_chunks = [chunk for score, chunk in scored_chunks[:3] if score > 0.4]
-    if not top_chunks:
-        top_chunks = [scored_chunks[0][1]]
-
-    context = "\n\n".join([
-        f"[{c['topic']}]\n{c['content']}"
-        for c in top_chunks
-    ])
-    confidence = float(scored_chunks[0][0])
-    
     history_text = "No previous conversation."
     session = None
     if session_store:
@@ -184,6 +182,37 @@ def _build_qa_prompt(query: str, session_id: str = "default", session_store: Ses
             session = session_store.create_qa_session(session_id)
         if session.history:
             history_text = "\n".join(session.history[-6:])
+
+    search_query = query
+    if session and session.history:
+        reformulated = generate_response(REFORMULATE_PROMPT.format(history=history_text, query=query)).strip()
+        search_query = reformulated if reformulated else query
+
+    domain = classify_query_domain(search_query)
+
+    allowed, reason = enforce_drorpay_scope(domain)
+    if not allowed:
+        return reason, "", 0.0, None
+
+    virtual_step = build_virtual_step(domain)
+    scored_chunks = store.search(search_query, step=virtual_step, top_k=6)
+
+    if not scored_chunks:
+        fallback_msg = generate_response(FALLBACK_PROMPT.format(query=query)).strip()
+        return fallback_msg, "", 0.0, None
+
+    top_chunks = [chunk for score, chunk in scored_chunks[:3] if score > 0.4]
+    if not top_chunks:
+        top_chunks = [scored_chunks[0][1]]
+
+    context = "\n\n".join([
+        f"[TOPIC: {c.get('topic', 'N/A')}]\n"
+        f"[CAPABILITY: {c.get('metadata', {}).get('capability', 'general')}]\n"
+        f"[LIFECYCLE: {c.get('metadata', {}).get('lifecycle_stage', 'general')}]\n"
+        f"{c['content']}"
+        for c in top_chunks
+    ])
+    confidence = float(scored_chunks[0][0])
 
     prompt = QA_SYSTEM_PROMPT.format(domain=domain, context=context, history=history_text, query=query)
     return None, prompt, confidence, session
