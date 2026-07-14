@@ -10,6 +10,7 @@ Fast path: queries with no DrorPay signal words are classified as
 """
 import json
 import os
+import re
 from app.core.llm.llm import generate_response
 
 PROVIDER = os.getenv("PROVIDER", "ollama").lower()
@@ -49,9 +50,12 @@ _DRORPAY_SIGNAL_WORDS = {
 
 
 def _has_drorpay_signal(query: str) -> bool:
-    # Use substring matching so punctuation (e.g. "payment?") never blocks a match.
     q = query.lower()
-    return any(word in q for word in _DRORPAY_SIGNAL_WORDS)
+    for word in _DRORPAY_SIGNAL_WORDS:
+        # Use regex to match whole words or exact hyphenated phrases
+        if re.search(r'\b' + re.escape(word) + r'\b', q):
+            return True
+    return False
 
 
 def _parse_domain(raw: str) -> str | None:
@@ -101,8 +105,7 @@ def classify_query_domain(query: str) -> str:
     raw = generate_response(prompt, json_mode=True)
     domain = _parse_domain(raw)
 
-    if domain and domain != "out_of_scope":
+    if domain:
         return domain
 
-    # Query passed keyword check — never let LLM override to out_of_scope
-    return "transactions"
+    return "out_of_scope"

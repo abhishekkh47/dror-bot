@@ -8,7 +8,6 @@ would misfire on authentication/webhook/refund domain questions.
 """
 from typing import AsyncGenerator
 from app.core.knowledge.domain_classifier import classify_query_domain
-from app.core.knowledge.virtual_step import build_virtual_step
 from app.core.knowledge.scope_guard import enforce_drorpay_scope
 from app.core.llm.retriever import store
 from app.core.llm.llm import generate_response, stream_response
@@ -108,9 +107,7 @@ async def answer_query(query: str, session_id: str = "default", session_store: S
             confidence=0.0,
         )
 
-    virtual_step = build_virtual_step(domain)
-
-    scored_chunks = store.search(search_query, step=virtual_step, top_k=6)
+    scored_chunks = store.search(search_query, domain=domain, top_k=6)
 
     if not scored_chunks:
         fallback_msg = generate_response(FALLBACK_PROMPT.format(query=query)).strip()
@@ -204,8 +201,7 @@ def _build_qa_prompt(query: str, session_id: str = "default", session_store: Ses
     if not allowed:
         return reason, "", 0.0, None
 
-    virtual_step = build_virtual_step(domain)
-    scored_chunks = store.search(search_query, step=virtual_step, top_k=6)
+    scored_chunks = store.search(search_query, domain=domain, top_k=6)
 
     if not scored_chunks:
         fallback_msg = generate_response(FALLBACK_PROMPT.format(query=query)).strip()

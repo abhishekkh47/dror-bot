@@ -141,7 +141,7 @@ class VectorStore:
             print(f"Error detecting intent: {e}")
             return None
     
-    def search(self, query: str, step=None, top_k=8):
+    def search(self, query: str, domain: str | list[str] = None, top_k=8):
         query_vec = get_embedding(query)
         
         # 1. RETRIEVE top 20 candidates from ChromaDB
@@ -176,11 +176,7 @@ class VectorStore:
         tokens = re.findall(r'\b\w+\b', query.lower())
         query_tokens = set(self.normalize_token(token) for token in tokens)
 
-        step_domain = getattr(step, "domain", None) if step else None
         intent = self.detect_intent_semantic(query)
-
-        if step and not step_domain:
-            raise ValueError(f"Step '{step.id}' missing domain")
 
         # 2. RE-RANK using custom logic
         scored = []
@@ -190,8 +186,8 @@ class VectorStore:
 
             similarity_score = self.cosine_similarity(query_vec_np, item["embedding"])
 
-            if step_domain:
-                allowed = step_domain if isinstance(step_domain, list) else [step_domain]                
+            if domain:
+                allowed = domain if isinstance(domain, list) else [domain]                
                 if not any(chunk_topic.startswith(d) for d in allowed):
                     continue
 

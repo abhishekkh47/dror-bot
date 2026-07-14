@@ -1,18 +1,11 @@
-from app.core.types import Step
+
 
 
 TEST_CASES = [
     {
         "name": "cancellation_after_processing",
         "query": "why was payment cancelled?",
-        "step": Step(
-            id="payment-status-step",
-            title="Payment Status",
-            domain=["payment_status"],
-            rag_topic="payment_status",
-            type="INFO",
-            description="Payment status debugging step",
-        ),
+        "domain": "payment_status",
         "must_include": [
             "cancel",
         ],
@@ -27,14 +20,7 @@ TEST_CASES = [
     {
         "name": "processing_failure",
         "query": "payment didn't complete",
-        "step": Step(
-            id="auto-completion-step",
-            title="Auto Completion",
-            domain=["auto_completion"],
-            rag_topic="auto_completion",
-            type="INFO",
-            description="Auto completion step",
-        ),
+        "domain": "auto_completion",
         "must_include": [
             "failed",
         ],
@@ -48,14 +34,7 @@ TEST_CASES = [
     {
         "name": "post_processing_failure",
         "query": "transaction failed after processing",
-        "step": Step(
-            id="platform-transaction-step",
-            title="Platform Transaction",
-            domain=["platform_transaction"],
-            rag_topic="platform_transaction",
-            type="INFO",
-            description="Platform transaction step",
-        ),
+        "domain": "platform_transaction",
         "must_include": [
             "processing",
         ],
