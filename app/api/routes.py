@@ -11,6 +11,7 @@ from app.core.types import QueryRequest, QueryResponse
 from pydantic import BaseModel
 from app.core.rag.ingestion_service import process_markdown_files
 from app.core.security.pii_redactor import redact_pii
+import traceback
 
 router = APIRouter()
 
@@ -45,7 +46,7 @@ async def sync_docs(request: SyncDocsRequest):
         store.reload(existing_files)
         return {"status": "success", "chunks_processed": len(processed_chunks)}
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": str(e), "traceback": traceback.format_exc()}
 
 flow_loader = FlowLoader()
 flow_loader.load_flows()

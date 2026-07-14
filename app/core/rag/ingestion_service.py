@@ -12,7 +12,7 @@ Extract:
 4. "type": One of [explanation, code, troubleshooting, reference].
 
 Respond ONLY with valid JSON.
-Example: {"capability": "webhooks", "lifecycle_stage": "confirmation", "tags": ["signature", "verification"], "type": "code"}
+Example: {{"capability": "webhooks", "lifecycle_stage": "confirmation", "tags": ["signature", "verification"], "type": "code"}}
 
 CHUNK:
 {chunk}

@@ -13,8 +13,9 @@ KNOWLEDGE_FILES = [
     "app/data/knowledge_base/troubleshooting.json",
 ]
 
-existing_files = [f for f in KNOWLEDGE_FILES if os.path.exists(f)]
-store = VectorStore(existing_files)
+# We now rely purely on the Chroma DB connection (decoupled runtime).
+# To populate data, run `python3 app/scripts/seed_chroma.py`
+store = VectorStore(path=None)
 
 def retrieve_context(query: str, rag_topic: str = None):
     results = store.search(query, top_k=8)
