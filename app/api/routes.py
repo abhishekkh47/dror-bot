@@ -8,7 +8,27 @@ from app.core.session_store import SessionStore
 from app.core.llm.rag_pipeline import ask_with_context
 from app.core.types import QueryRequest, QueryResponse
 
+from pydantic import BaseModel
+from app.core.rag.ingestion_service import process_markdown_files
+
 router = APIRouter()
+
+class SyncDocsRequest(BaseModel):
+    files: list[dict]
+
+@router.post("/admin/sync-docs")
+async def sync_docs(request: SyncDocsRequest):
+    try:
+        processed_chunks = process_markdown_files(request.files)
+        from app.core.llm.retriever import store, KNOWLEDGE_FILES
+        import os
+        if "app/data/knowledge_base/dynamic_ingestion.json" not in KNOWLEDGE_FILES:
+            KNOWLEDGE_FILES.append("app/data/knowledge_base/dynamic_ingestion.json")
+        existing_files = [f for f in KNOWLEDGE_FILES if os.path.exists(f)]
+        store.reload(existing_files)
+        return {"status": "success", "chunks_processed": len(processed_chunks)}
+    except Exception as e:
+        return {"error": str(e)}
 
 flow_loader = FlowLoader()
 flow_loader.load_flows()

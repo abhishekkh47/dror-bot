@@ -23,6 +23,21 @@ class VectorStore:
         self._build_index()
         self.build_topic_index()
 
+    def reload(self, path: str | list[str]):
+        if isinstance(path, str):
+            path = [path]
+        
+        import os
+        self.chunks = []
+        for p in path:
+            if os.path.exists(p):
+                with open(p, "r") as f:
+                    self.chunks.extend(json.load(f))
+        
+        self.vectors = []
+        self._build_index()
+        self.build_topic_index()
+
     def _build_index(self):
         for chunk in self.chunks:
             text_to_embed = f"""
