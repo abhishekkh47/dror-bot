@@ -37,7 +37,7 @@ async def process_input(session_id: str, user_input: str):
 @router.post("/query", response_model=QueryResponse)
 async def query(request: QueryRequest):
     """Standard (non-streaming) QA endpoint. Returns complete answer as JSON."""
-    return await answer_query(query=request.query, session_id=request.session_id)
+    return await answer_query(query=request.query, session_id=request.session_id, session_store=session_store)
 
 
 @router.post("/query/stream")
@@ -57,7 +57,7 @@ async def query_stream(request: QueryRequest):
           -d '{"query": "how do I verify webhook signatures?"}'
     """
     async def event_generator():
-        async for token in stream_query(request.query):
+        async for token in stream_query(request.query, session_id=request.session_id, session_store=session_store):
             # SSE format: each event is "data: <payload>\n\n"
             yield f"data: {json.dumps({'token': token})}\n\n"
         yield "data: [DONE]\n\n"

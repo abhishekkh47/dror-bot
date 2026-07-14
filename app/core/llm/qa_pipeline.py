@@ -14,6 +14,7 @@ from app.core.llm.retriever import store
 from app.core.llm.llm import generate_response, stream_response
 from app.core.security.request_guard import validate_request
 from app.core.types import QueryResponse, SourceCitation
+from app.core.session_store import SessionStore
 
 QA_SYSTEM_PROMPT = """You are DrorBot, the official DrorPay integration assistant.
 You help third-party developers integrate DrorPay into their applications.
@@ -22,6 +23,9 @@ DOMAIN: {domain}
 
 CONTEXT (answer from this only):
 {context}
+
+CONVERSATION HISTORY:
+{history}
 
 RULES:
 - Use only the provided context. If it lacks the answer, say so clearly.
@@ -40,7 +44,7 @@ NO_CONTEXT_RESPONSE = (
     "Please refer to the DrorPay integration documentation or contact the DrorPay support team."
 )
 
-async def answer_query(query: str, session_id: str = "default") -> QueryResponse:
+async def answer_query(query: str, session_id: str = "default", session_store: SessionStore = None) -> QueryResponse:
     """
     Full QA pipeline:
     1. Validate request (security guard)
@@ -84,9 +88,11 @@ async def answer_query(query: str, session_id: str = "default") -> QueryResponse
         )
 
     # Take top 3 chunks by score; skip noise-penalized ones if score < 0.4
-    top_chunks = [chunk for score, chunk in scored_chunks[:3] if score > 0.4]
-    if not top_chunks:
-        top_chunks = [scored_chunks[0][1]]
+    top_scored_chunks = [(score, chunk) for score, chunk in scored_chunks[:3] if score > 0.4]
+    if not top_scored_chunks:
+        top_scored_chunks = [scored_chunks[0]]
+
+    top_chunks = [chunk for score, chunk in top_scored_chunks]
 
     context = "\n\n".join([
         f"[{c['topic']}]\n{c['content']}"
@@ -95,21 +101,37 @@ async def answer_query(query: str, session_id: str = "default") -> QueryResponse
 
     confidence = float(scored_chunks[0][0]) if scored_chunks else 0.0
 
+    history_text = "No previous conversation."
+    session = None
+    if session_store:
+        try:
+            session = session_store.get(session_id)
+        except Exception:
+            session = session_store.create_qa_session(session_id)
+        if session.history:
+            history_text = "\n".join(session.history[-6:])
+
     prompt = QA_SYSTEM_PROMPT.format(
         domain=domain,
         context=context,
+        history=history_text,
         query=query,
     )
     
     response = generate_response(prompt)
+    
+    if session and session_store:
+        session.history.append(f"User: {query}")
+        session.history.append(f"Assistant: {response.strip()}")
+        session_store.update(session)
 
     citations = [
         {
-            "file_name": c["topic"],
-            "snippet": c["content"][:200] + "..." if len(c["content"]) > 200 else c["content"],
+            "file_name": chunk["topic"],
+            "snippet": chunk["content"][:200] + "..." if len(chunk["content"]) > 200 else chunk["content"],
             "relevance_score": float(score)
         }
-        for score, c in top_chunks
+        for score, chunk in top_scored_chunks
     ]
 
     return QueryResponse(
@@ -121,27 +143,27 @@ async def answer_query(query: str, session_id: str = "default") -> QueryResponse
     )
 
 
-def _build_qa_prompt(query: str) -> tuple[str | None, str, float]:
+def _build_qa_prompt(query: str, session_id: str = "default", session_store: SessionStore = None):
     """
     Shared logic: validate → classify → retrieve → build prompt.
-    Returns (error_message_or_None, prompt, confidence).
+    Returns (error_message_or_None, prompt, confidence, session).
     If error_message is not None, the caller should stream that message directly.
     """
     is_valid, validation_error = validate_request(query)
     if not is_valid:
-        return validation_error, "", 0.0
+        return validation_error, "", 0.0, None
 
     domain = classify_query_domain(query)
 
     allowed, reason = enforce_drorpay_scope(domain)
     if not allowed:
-        return reason, "", 0.0
+        return reason, "", 0.0, None
 
     virtual_step = build_virtual_step(domain)
     scored_chunks = store.search(query, step=virtual_step, top_k=6)
 
     if not scored_chunks:
-        return NO_CONTEXT_RESPONSE, "", 0.0
+        return NO_CONTEXT_RESPONSE, "", 0.0, None
 
     top_chunks = [chunk for score, chunk in scored_chunks[:3] if score > 0.4]
     if not top_chunks:
@@ -152,11 +174,22 @@ def _build_qa_prompt(query: str) -> tuple[str | None, str, float]:
         for c in top_chunks
     ])
     confidence = float(scored_chunks[0][0])
-    prompt = QA_SYSTEM_PROMPT.format(domain=domain, context=context, query=query)
-    return None, prompt, confidence
+    
+    history_text = "No previous conversation."
+    session = None
+    if session_store:
+        try:
+            session = session_store.get(session_id)
+        except Exception:
+            session = session_store.create_qa_session(session_id)
+        if session.history:
+            history_text = "\n".join(session.history[-6:])
+
+    prompt = QA_SYSTEM_PROMPT.format(domain=domain, context=context, history=history_text, query=query)
+    return None, prompt, confidence, session
 
 
-async def stream_query(query: str) -> AsyncGenerator[str, None]:
+async def stream_query(query: str, session_id: str = "default", session_store: SessionStore = None) -> AsyncGenerator[str, None]:
     """
     Streaming version of answer_query.
     Yields tokens as they are generated by the LLM.
@@ -165,13 +198,20 @@ async def stream_query(query: str) -> AsyncGenerator[str, None]:
     Early-exit messages (blocked, out_of_scope, no_context) are yielded
     as a single chunk so the client always receives something.
     """
-    error, prompt, _ = _build_qa_prompt(query)
+    error, prompt, _, session = _build_qa_prompt(query, session_id, session_store)
     if error:
         yield error
         return
 
+    full_response = []
     for token in stream_response(prompt):
+        full_response.append(token)
         yield token
+        
+    if session and session_store:
+        session.history.append(f"User: {query}")
+        session.history.append(f"Assistant: {''.join(full_response).strip()}")
+        session_store.update(session)
 
 
 """

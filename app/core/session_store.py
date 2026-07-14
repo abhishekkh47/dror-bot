@@ -15,6 +15,14 @@ class SessionStore:
         self.sessions[session.session_id] = session
         return session
     
+    def create_qa_session(self, session_id: str = None) -> Session:
+        session = Session(
+            session_id = session_id or str(uuid.uuid4()),
+            history = []
+        )
+        self.sessions[session.session_id] = session
+        return session
+    
     def get(self, session_id: str) -> Session:
         if session_id not in self.sessions:
             raise Exception("Session not found")

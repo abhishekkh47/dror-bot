@@ -20,6 +20,7 @@ from typing import Generator
 import requests
 import dotenv
 from app.utils.logger import logger
+from openai import OpenAI
 
 dotenv.load_dotenv()
 
@@ -77,7 +78,6 @@ def _stream_ollama(prompt: str) -> Generator[str, None, None]:
 # ── OpenAI ────────────────────────────────────────────────────────────────────
 
 def _generate_openai(prompt: str, json_mode: bool = False) -> str:
-    from openai import OpenAI
     client = OpenAI(api_key=OPENAI_API_KEY)
     kwargs: dict = {
         "model": OPENAI_MODEL,
@@ -92,7 +92,6 @@ def _generate_openai(prompt: str, json_mode: bool = False) -> str:
 
 
 def _stream_openai(prompt: str) -> Generator[str, None, None]:
-    from openai import OpenAI
     client = OpenAI(api_key=OPENAI_API_KEY)
     stream = client.chat.completions.create(
         model=OPENAI_MODEL,

@@ -130,8 +130,8 @@ class Flow(BaseModel):
 
 class Session(BaseModel):
     session_id: str
-    flow_id: str
-    current_step: str
+    flow_id: Optional[str] = None
+    current_step: Optional[str] = None
     history: List[str]
 
 class ExecutionResult(BaseModel):
