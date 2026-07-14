@@ -15,6 +15,11 @@ from app.core.llm.llm import generate_response, stream_response
 from app.core.security.request_guard import validate_request
 from app.core.types import QueryResponse, SourceCitation
 from app.core.session_store import SessionStore
+import time
+import logging
+
+logger = logging.getLogger("drorbot.telemetry")
+logger.setLevel(logging.INFO)
 
 QA_SYSTEM_PROMPT = """You are DrorBot, the official DrorPay integration assistant.
 You help third-party developers integrate DrorPay into their applications.
@@ -66,6 +71,8 @@ async def answer_query(query: str, session_id: str = "default", session_store: S
     6. Generate response
     7. Return structured result
     """
+    start_time = time.time()
+    
     is_valid, validation_error = validate_request(query)
     if not is_valid:
         return QueryResponse(
@@ -154,6 +161,9 @@ async def answer_query(query: str, session_id: str = "default", session_store: S
         for score, chunk in top_scored_chunks
     ]
 
+    latency = time.time() - start_time
+    logger.info(f"[TELEMETRY] type=qa_response | mode=answered | latency={latency:.2f}s | confidence={confidence:.2f} | domain={domain}")
+
     return QueryResponse(
         answer=response.strip(),
         domain=domain,
@@ -227,7 +237,8 @@ async def stream_query(query: str, session_id: str = "default", session_store: S
     Early-exit messages (blocked, out_of_scope, no_context) are yielded
     as a single chunk so the client always receives something.
     """
-    error, prompt, _, session = _build_qa_prompt(query, session_id, session_store)
+    start_time = time.time()
+    error, prompt, confidence, session = _build_qa_prompt(query, session_id, session_store)
     if error:
         yield error
         return
@@ -241,6 +252,9 @@ async def stream_query(query: str, session_id: str = "default", session_store: S
         session.history.append(f"User: {query}")
         session.history.append(f"Assistant: {''.join(full_response).strip()}")
         session_store.update(session)
+        
+    latency = time.time() - start_time
+    logger.info(f"[TELEMETRY] type=qa_stream | mode=answered | latency={latency:.2f}s | confidence={confidence:.2f}")
 
 
 """

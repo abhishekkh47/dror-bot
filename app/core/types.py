@@ -133,6 +133,8 @@ class Session(BaseModel):
     flow_id: Optional[str] = None
     current_step: Optional[str] = None
     history: List[str]
+    feedback_rating: Optional[str] = None
+    feedback_comments: Optional[str] = None
 
 class ExecutionResult(BaseModel):
     response: str

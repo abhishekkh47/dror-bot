@@ -17,6 +17,22 @@ router = APIRouter()
 class SyncDocsRequest(BaseModel):
     files: list[dict]
 
+class FeedbackRequest(BaseModel):
+    session_id: str
+    rating: str
+    comments: str | None = None
+
+@router.post("/feedback")
+async def submit_feedback(request: FeedbackRequest):
+    try:
+        session = session_store.get(request.session_id)
+        session.feedback_rating = request.rating
+        session.feedback_comments = request.comments
+        session_store.update(session)
+        return {"status": "success"}
+    except Exception as e:
+        return {"error": str(e)}
+
 @router.post("/admin/sync-docs")
 async def sync_docs(request: SyncDocsRequest):
     try:
