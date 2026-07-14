@@ -111,7 +111,21 @@ async def answer_query(query: str, session_id: str = None, session_store: Sessio
 
     scored_chunks = store.search(search_query, domain=domain, top_k=6)
 
-    if not scored_chunks:
+    # Filter for high relevance chunks
+    top_scored_chunks = [(score, chunk) for score, chunk in scored_chunks[:3] if score > 0.4]
+    
+    # If no highly relevant chunks found with domain filter, try without it
+    if not top_scored_chunks:
+        fallback_chunks = store.search(search_query, domain=None, top_k=6)
+        top_scored_chunks = [(score, chunk) for score, chunk in fallback_chunks[:3] if score > 0.4]
+        if not top_scored_chunks and fallback_chunks:
+            top_scored_chunks = [fallback_chunks[0]]
+            scored_chunks = fallback_chunks
+            
+    if not top_scored_chunks and scored_chunks:
+        top_scored_chunks = [scored_chunks[0]]
+
+    if not top_scored_chunks:
         fallback_msg = generate_response(FALLBACK_PROMPT.format(query=query)).strip()
         return QueryResponse(
             answer=fallback_msg,
@@ -120,11 +134,6 @@ async def answer_query(query: str, session_id: str = None, session_store: Sessio
             session_id=session_id or "",
             confidence=0.0,
         )
-
-    # Take top 3 chunks by score; skip noise-penalized ones if score < 0.4
-    top_scored_chunks = [(score, chunk) for score, chunk in scored_chunks[:3] if score > 0.4]
-    if not top_scored_chunks:
-        top_scored_chunks = [scored_chunks[0]]
 
     top_chunks = [chunk for score, chunk in top_scored_chunks]
 
@@ -207,13 +216,23 @@ def _build_qa_prompt(query: str, session_id: str = None, session_store: SessionS
 
     scored_chunks = store.search(search_query, domain=domain, top_k=6)
 
-    if not scored_chunks:
+    # Filter for high relevance chunks
+    top_chunks = [chunk for score, chunk in scored_chunks[:3] if score > 0.4]
+    
+    # If no highly relevant chunks found with domain filter, try without it
+    if not top_chunks:
+        fallback_chunks = store.search(search_query, domain=None, top_k=6)
+        top_chunks = [chunk for score, chunk in fallback_chunks[:3] if score > 0.4]
+        if not top_chunks and fallback_chunks:
+            top_chunks = [fallback_chunks[0][1]]
+            scored_chunks = fallback_chunks
+            
+    if not top_chunks and scored_chunks:
+        top_chunks = [scored_chunks[0][1]]
+
+    if not top_chunks:
         fallback_msg = generate_response(FALLBACK_PROMPT.format(query=query)).strip()
         return fallback_msg, "", 0.0, None
-
-    top_chunks = [chunk for score, chunk in scored_chunks[:3] if score > 0.4]
-    if not top_chunks:
-        top_chunks = [scored_chunks[0][1]]
 
     context = "\n\n".join([
         f"[TOPIC: {c.get('topic', 'N/A')}]\n"
