@@ -13,7 +13,7 @@ from app.core.knowledge.scope_guard import enforce_drorpay_scope
 from app.core.llm.retriever import store
 from app.core.llm.llm import generate_response, stream_response
 from app.core.security.request_guard import validate_request
-from app.core.types import QueryResponse
+from app.core.types import QueryResponse, SourceCitation
 
 QA_SYSTEM_PROMPT = """You are DrorBot, the official DrorPay integration assistant.
 You help third-party developers integrate DrorPay into their applications.
@@ -29,6 +29,7 @@ RULES:
 - Copy field names, header names, event names, endpoint paths, and algorithm names verbatim.
 - Include code examples when the context contains them.
 - Be precise and concise (3-5 sentences unless a code example is needed).
+- When providing an answer, you MUST append a citation block at the end referencing the source topics used. Use the format: `[Source: TOPIC]`.
 
 QUESTION: {query}
 
@@ -102,11 +103,21 @@ async def answer_query(query: str, session_id: str = "default") -> QueryResponse
     
     response = generate_response(prompt)
 
+    citations = [
+        {
+            "file_name": c["topic"],
+            "snippet": c["content"][:200] + "..." if len(c["content"]) > 200 else c["content"],
+            "relevance_score": float(score)
+        }
+        for score, c in top_chunks
+    ]
+
     return QueryResponse(
         answer=response.strip(),
         domain=domain,
         mode="answered",
         confidence=confidence,
+        citations=citations
     )
 
 

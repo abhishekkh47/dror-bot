@@ -2,3 +2,5 @@
 # /docs
 .env
 *.pyc
+/docs/analysis
+/docs/superpowers

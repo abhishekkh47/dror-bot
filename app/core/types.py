@@ -156,6 +156,11 @@ class ExecutionResult(BaseModel):
     operational_ambiguities: list[str] = []
     human_escalation_required: bool = False
 
+class SourceCitation(BaseModel):
+    file_name: str
+    snippet: str
+    relevance_score: float
+
 class QueryRequest(BaseModel):
     query: str
     session_id: str = "default"
@@ -165,3 +170,4 @@ class QueryResponse(BaseModel):
     domain: str
     mode: str
     confidence: float = 0.0
+    citations: List[SourceCitation] = []
