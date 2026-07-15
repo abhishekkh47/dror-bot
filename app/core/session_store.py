@@ -17,6 +17,15 @@ class SessionStore:
                     data TEXT
                 )
             ''')
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS feedback_evaluations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id TEXT,
+                    rating TEXT,
+                    comments TEXT,
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
             
     def create_qa_session(self, session_id: str = None) -> Session:
         session = Session(
@@ -39,4 +48,11 @@ class SessionStore:
             conn.execute(
                 'INSERT OR REPLACE INTO sessions (session_id, data) VALUES (?, ?)',
                 (session.session_id, session.model_dump_json())
+            )
+
+    def log_evaluation_feedback(self, session_id: str, rating: str, comments: str = None):
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                'INSERT INTO feedback_evaluations (session_id, rating, comments) VALUES (?, ?, ?)',
+                (session_id, rating, comments)
             )

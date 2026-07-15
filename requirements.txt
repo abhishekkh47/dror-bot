@@ -44,3 +44,4 @@ ragas==0.1.7
 datasets==2.19.1
 pytest-asyncio==0.23.6
 langchain-text-splitters==0.0.1
+slowapi>=0.1.9

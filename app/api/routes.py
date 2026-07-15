@@ -9,8 +9,25 @@ from pydantic import BaseModel
 from app.core.rag.ingestion_service import process_markdown_files
 from app.core.security.pii_redactor import redact_pii
 import traceback
+from fastapi import APIRouter, Request, Depends, HTTPException, status
+from fastapi.security.api_key import APIKeyHeader
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 router = APIRouter()
+limiter = Limiter(key_func=get_remote_address)
+
+import os
+ADMIN_API_KEY = os.getenv("ADMIN_API_KEY", "supersecret-dev-key")
+api_key_header = APIKeyHeader(name="X-Admin-Api-Key", auto_error=False)
+
+async def get_api_key(api_key: str = Depends(api_key_header)):
+    if not api_key or api_key != ADMIN_API_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing API Key",
+        )
+    return api_key
 
 class SyncDocsRequest(BaseModel):
     files: list[dict]
@@ -21,20 +38,27 @@ class FeedbackRequest(BaseModel):
     comments: str | None = None
 
 @router.post("/feedback")
-async def submit_feedback(request: FeedbackRequest):
+@limiter.limit("20/minute")
+async def submit_feedback(request: Request, feedback_request: FeedbackRequest):
     try:
-        session = session_store.get(request.session_id)
-        session.feedback_rating = request.rating
-        session.feedback_comments = request.comments
+        session = session_store.get(feedback_request.session_id)
+        session.feedback_rating = feedback_request.rating
+        session.feedback_comments = feedback_request.comments
         session_store.update(session)
+        # Log to separate evaluation table
+        session_store.log_evaluation_feedback(
+            feedback_request.session_id, 
+            feedback_request.rating, 
+            feedback_request.comments
+        )
         return {"status": "success"}
     except Exception as e:
         return {"error": str(e)}
 
-@router.post("/admin/sync-docs")
-async def sync_docs(request: SyncDocsRequest):
+@router.post("/admin/sync-docs", dependencies=[Depends(get_api_key)])
+async def sync_docs(request: Request, sync_request: SyncDocsRequest):
     try:
-        processed_chunks = process_markdown_files(request.files)
+        processed_chunks = process_markdown_files(sync_request.files)
         from app.core.llm.retriever import store, KNOWLEDGE_FILES
         import os
         if "app/data/knowledge_base/dynamic_ingestion.json" not in KNOWLEDGE_FILES:
@@ -50,17 +74,19 @@ class SessionStartResponse(BaseModel):
     session_id: str
 
 @router.post("/session/start", response_model=SessionStartResponse)
-async def start_session():
+@limiter.limit("20/minute")
+async def start_session(request: Request):
     """Generates a new session and returns the session_id to be used in /query."""
     session = session_store.create_qa_session()
     return {"session_id": session.session_id}
 
 
 @router.post("/query", response_model=QueryResponse)
-async def query(request: QueryRequest):
+@limiter.limit("20/minute")
+async def query(request: Request, query_request: QueryRequest):
     """Standard (non-streaming) QA endpoint. Returns complete answer as JSON."""
-    safe_query = redact_pii(request.query)
-    session_id = request.session_id
+    safe_query = redact_pii(query_request.query)
+    session_id = query_request.session_id
     if not session_id:
         session = session_store.create_qa_session()
         session_id = session.session_id
@@ -71,7 +97,8 @@ async def query(request: QueryRequest):
 
 
 @router.post("/query/stream")
-async def query_stream(request: QueryRequest):
+@limiter.limit("20/minute")
+async def query_stream(request: Request, query_request: QueryRequest):
     """
     Streaming QA endpoint using Server-Sent Events (SSE).
 
@@ -86,8 +113,8 @@ async def query_stream(request: QueryRequest):
           -H "Content-Type: application/json" \\
           -d '{"query": "how do I verify webhook signatures?"}'
     """
-    safe_query = redact_pii(request.query)
-    session_id = request.session_id
+    safe_query = redact_pii(query_request.query)
+    session_id = query_request.session_id
     if not session_id:
         session = session_store.create_qa_session()
         session_id = session.session_id
