@@ -17,6 +17,7 @@ KNOWLEDGE_FILES = [
     "app/data/knowledge_base/refunds.json",
     "app/data/knowledge_base/disputes.json",
     "app/data/knowledge_base/troubleshooting.json",
+    "app/data/knowledge_base/platform_users.json",
 ]
 
 def seed_database():

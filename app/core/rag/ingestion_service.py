@@ -51,22 +51,27 @@ def process_markdown_files(files_data: list[dict]):
             
             topic = filename + " > " + " > ".join(topic_parts) if topic_parts else filename
             
-            # Generate metadata
-            prompt = METADATA_PROMPT.format(chunk=chunk_content[:1500])  # limit size for prompt
-            try:
-                response = generate_response(prompt).strip()
-                # Clean markdown block if LLM added it
-                if response.startswith("```json"):
-                    response = response[7:-3]
+            # Robust and instant rule-based metadata generation
+            lower_content = chunk_content.lower()
+            
+            capability = "general"
+            if "webhook" in lower_content: capability = "webhooks"
+            elif "auth" in lower_content or "token" in lower_content: capability = "authentication"
+            elif "intent" in lower_content or "payment" in lower_content: capability = "payment_intents"
+            elif "dispute" in lower_content: capability = "disputes"
+            elif "refund" in lower_content: capability = "refunds"
+            elif "platform" in lower_content: capability = "platform_setup"
+            
+            chunk_type = "explanation"
+            if "post " in lower_content or "get " in lower_content or "```" in lower_content:
+                chunk_type = "api_spec"
                 
-                meta = json.loads(response)
-            except Exception as e:
-                meta = {
-                    "capability": "general",
-                    "lifecycle_stage": "general",
-                    "tags": [],
-                    "type": "explanation"
-                }
+            meta = {
+                "capability": capability,
+                "lifecycle_stage": "general",
+                "tags": [t.lower() for t in topic_parts] if topic_parts else [],
+                "type": chunk_type
+            }
                 
             chunk_obj = {
                 "topic": topic,

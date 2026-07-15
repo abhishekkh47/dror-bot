@@ -1,0 +1,34 @@
+[
+  {
+    "id": "platform_user_registration",
+    "topic": "register_platform_user",
+    "type": "api_spec",
+    "tags": ["register", "user", "add user", "platform_account", "onboarding"],
+    "importance": "high",
+    "content": "Add a new user to your platform: POST /platform/v1/register-platform-account\n\nThis endpoint registers an existing DrorPay user as a user on your platform. You must call this before the user can participate in platform transactions.\n\nHeaders required: \n- Authorization: Bearer <jwt>\n- X-Platform-Secret: <secret>\n- X-Platform-Code: <code>\n\nRequest body:\n- business_id (string UUID, optional): If the user is being registered under a specific business account, provide the business UUID. Otherwise, it defaults to null for personal accounts.\n\nThe backend automatically extracts the user_id from the JWT token and the platform_id from the platform code. It will upsert the platform account (create it if it doesn't exist, or update it if it does).\n\nResponse:\n- id: The newly created (or existing) platform_users record ID."
+  },
+  {
+    "id": "platform_user_account_list",
+    "topic": "get_platform_user_accounts",
+    "type": "api_spec",
+    "tags": ["user accounts", "connected accounts", "list", "platform"],
+    "importance": "medium",
+    "content": "Get connected accounts for a user: GET /platform/v1/user-account-list\n\nHeaders required: \n- Authorization: Bearer <jwt>\n- X-Platform-Secret: <secret>\n- X-Platform-Code: <code>\n\nThis endpoint returns the list of platform accounts connected to the authenticated user on the current platform. It uses the user_id from the JWT and the platform_id from the platform headers.\n\nResponse includes a list of account objects."
+  },
+  {
+    "id": "platform_users_list",
+    "topic": "get_platform_users_list",
+    "type": "api_spec",
+    "tags": ["users list", "platform users", "merchants", "list"],
+    "importance": "high",
+    "content": "Get list of all platform users: GET /platform/v1/platform-users\n\nHeaders required: \n- Authorization: Bearer <jwt>\n- X-Platform-Secret: <secret>\n- X-Platform-Code: <code>\n\nQuery Parameters:\n- type (string, optional): Can be 'merchant' to fetch only merchant users, or 'user' for regular users. If omitted, it may fetch all users based on backend configuration.\n\nThis endpoint returns a paginated or full list of all users registered on the platform, allowing the platform developer to see their user base."
+  },
+  {
+    "id": "platform_user_details",
+    "topic": "get_platform_user_details",
+    "type": "api_spec",
+    "tags": ["user details", "account details", "platform user", "profile"],
+    "importance": "medium",
+    "content": "Get platform user account details: GET /platform/v1/user/account\n\nHeaders required: \n- Authorization: Bearer <jwt>\n- X-Platform-Secret: <secret>\n- X-Platform-Code: <code>\n\nThis endpoint fetches the detailed profile information for the authenticated platform user. It extracts the user_id from the JWT token and returns the corresponding account details."
+  }
+]
