@@ -2,6 +2,8 @@
 
 DrorBot is the official, enterprise-grade AI assistant designed to help third-party developers seamlessly integrate with the DrorPay platform. Powered by a strict Retrieval-Augmented Generation (RAG) architecture, DrorBot dynamically pulls context from internal documentation hosted on Chroma Cloud, ensuring highly accurate, domain-specific answers while strictly rejecting out-of-scope queries.
 
+<video src="https://github.com/user-attachments/assets/76606f7f-241e-411b-8f3c-8d1d4f1b2840" controls="controls" width="100%"></video>
+
 [🎥 Watch the DrorBot Demo Video](https://drive.google.com/file/d/1Gw4IK3zGHPabBuev8KDcoR6lKL4uBc9D/view?usp=sharing)
 
 ---
