@@ -134,3 +134,11 @@ This is a private webhook endpoint that your internal backend scripts (e.g., `se
   ]
 }
 ```
+
+---
+
+### 🏢 Reusing the Bot for Other Businesses
+
+If you'd like to use this RAG engine for a completely different purpose (e.g., a Hotel Booking Assistant, Internal HR Bot), you will need to detach the hardcoded DrorPay context from the prompts and domain routing logic. 
+
+Please read the [White-Labeling Guide](file:///Users/mind/Projects/dror-bot/WHITE_LABELING_GUIDE.md) for detailed instructions on exactly what architectural changes are required to repurpose this bot.
