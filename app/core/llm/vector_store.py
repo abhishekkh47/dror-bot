@@ -74,11 +74,17 @@ class VectorStore:
             chunk_id = self._generate_id(chunk)
             
             # Prepare metadata (must be str, int, float or bool)
+            domain = chunk.get("metadata", {}).get("capability")
+            if not domain:
+                # fallback for legacy json files where topic starts with domain
+                domain = chunk.get("topic", "").split(" > ")[0].strip()
+
             meta = {
                 "topic": chunk.get("topic", ""),
                 "type": chunk.get("type", ""),
                 "importance": chunk.get("importance", "medium"),
-                "tags": ",".join(chunk.get("tags", []))
+                "tags": ",".join(chunk.get("tags", [])),
+                "domain": domain
             }
 
             if chunk_id not in existing_ids:
@@ -165,6 +171,7 @@ class VectorStore:
                 "type": meta.get("type", ""),
                 "importance": meta.get("importance", "medium"),
                 "tags": meta.get("tags", "").split(",") if meta.get("tags") else [],
+                "domain": meta.get("domain", "general"),
                 "content": results["documents"][0][i]
             }
             candidates.append({
@@ -188,7 +195,8 @@ class VectorStore:
 
             if domain:
                 allowed = domain if isinstance(domain, list) else [domain]                
-                if not any(chunk_topic.startswith(d) for d in allowed):
+                chunk_domain = chunk.get("domain", "")
+                if not any((chunk_domain == d or chunk_topic.startswith(d)) for d in allowed):
                     continue
 
             chunk_tags = set(self.normalize_token(tag) for tag in chunk.get("tags", []))

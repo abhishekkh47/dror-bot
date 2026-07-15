@@ -1,7 +1,7 @@
 [
   {
     "id": "platform_user_registration",
-    "topic": "register_platform_user",
+    "topic": "platform_setup > register_platform_user",
     "type": "api_spec",
     "tags": ["register", "user", "add user", "platform_account", "onboarding"],
     "importance": "high",
@@ -9,7 +9,7 @@
   },
   {
     "id": "platform_user_account_list",
-    "topic": "get_platform_user_accounts",
+    "topic": "platform_setup > get_platform_user_accounts",
     "type": "api_spec",
     "tags": ["user accounts", "connected accounts", "list", "platform"],
     "importance": "medium",
@@ -17,7 +17,7 @@
   },
   {
     "id": "platform_users_list",
-    "topic": "get_platform_users_list",
+    "topic": "platform_setup > get_platform_users_list",
     "type": "api_spec",
     "tags": ["users list", "platform users", "merchants", "list"],
     "importance": "high",
@@ -25,7 +25,7 @@
   },
   {
     "id": "platform_user_details",
-    "topic": "get_platform_user_details",
+    "topic": "platform_setup > get_platform_user_details",
     "type": "api_spec",
     "tags": ["user details", "account details", "platform user", "profile"],
     "importance": "medium",
