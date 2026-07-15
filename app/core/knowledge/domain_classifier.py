@@ -21,7 +21,7 @@ Classify the user query into exactly ONE of these domains:
 
 - authentication: API headers, JWT tokens, X-Platform-Secret, X-Platform-Code, auth errors, credentials, KYC, phone verification, 401 errors
 - platform_setup: creating a platform, generating platform secret, platform onboarding, platform slug, admin setup, retrieve secret
-- transactions: create-intent, payment creation, transaction status, listing transactions, platform_order_id, platform_transaction_id, auto-completion, does the user approve, auto-complete, payment lifecycle, when does a payment complete
+- transactions: create-intent, payment creation, transaction status, listing transactions, platform_order_id, platform_transaction_id, auto-completion, does the user approve, auto-complete, payment lifecycle, when does a payment complete, settlement, payout, vendor payout, hold time, eventbridge scheduler
 - webhooks: webhook events, payment callback URL, webhook signature, HMAC verification, retry behavior, payment.created, payment.completed, delivery
 - sockets: socket.io, real-time updates, join-payment-room, payment room, socket events, websocket, when to join
 - refunds: cancel-and-refund, partial refund, full refund, refund amount, platform_transaction_detail_ids, fees refunded
@@ -46,6 +46,8 @@ _DRORPAY_SIGNAL_WORDS = {
     "api", "callback", "signature", "hmac", "header", "secret", "slug",
     "kyc", "wallet", "sender", "receiver", "merchant", "create-intent",
     "cancel", "x-platform", "x-drorpay", "status", "credential",
+    "settle", "settled", "settlement", "payout", "payouts", "vendor", "balance", "hold",
+    "eventbridge", "cron", "reconciliation", "reconcile",
 }
 
 
