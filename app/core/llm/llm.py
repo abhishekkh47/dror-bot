@@ -20,7 +20,7 @@ from typing import Generator
 import requests
 import dotenv
 from app.utils.logger import logger
-from openai import OpenAI
+from openai import OpenAI, AsyncOpenAI
 
 dotenv.load_dotenv()
 
@@ -91,16 +91,16 @@ def _generate_openai(prompt: str, json_mode: bool = False) -> str:
     return completion.choices[0].message.content
 
 
-def _stream_openai(prompt: str) -> Generator[str, None, None]:
-    client = OpenAI(api_key=OPENAI_API_KEY)
-    stream = client.chat.completions.create(
+async def _stream_openai(prompt: str):
+    client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+    stream = await client.chat.completions.create(
         model=OPENAI_MODEL,
         messages=[{"role": "user", "content": prompt}],
         temperature=0.1,
         max_tokens=1024,
         stream=True,
     )
-    for chunk in stream:
+    async for chunk in stream:
         token = chunk.choices[0].delta.content
         if token:
             yield token
@@ -183,9 +183,9 @@ def generate_response(prompt: str, json_mode: bool = False) -> str:
         return f"Error generating response: {e}"
 
 
-def stream_response(prompt: str) -> Generator[str, None, None]:
+async def stream_response(prompt: str):
     """
-    Stream response tokens as a generator.
+    Stream response tokens as an async generator.
     Used by the /query/stream SSE endpoint.
     Set PROVIDER env var to switch between: ollama | openai | gemini
     """
@@ -195,4 +195,5 @@ def stream_response(prompt: str) -> Generator[str, None, None]:
             f"Unknown PROVIDER: '{PROVIDER}'. "
             f"Supported: {list(_STREAM_PROVIDERS.keys())}"
         )
-    yield from fn(prompt)
+    async for token in fn(prompt):
+        yield token

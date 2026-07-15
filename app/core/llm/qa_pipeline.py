@@ -222,11 +222,10 @@ def _build_qa_prompt(query: str, session_id: str = None, session_store: SessionS
     # If no highly relevant chunks found with domain filter, try without it
     if not top_chunks:
         fallback_chunks = store.search(search_query, domain=None, top_k=6)
+        scored_chunks = fallback_chunks
         top_chunks = [chunk for score, chunk in fallback_chunks[:3] if score > 0.4]
         if not top_chunks and fallback_chunks:
             top_chunks = [fallback_chunks[0][1]]
-            scored_chunks = fallback_chunks
-            
     if not top_chunks and scored_chunks:
         top_chunks = [scored_chunks[0][1]]
 
@@ -263,7 +262,7 @@ async def stream_query(query: str, session_id: str = None, session_store: Sessio
         return
 
     full_response = []
-    for token in stream_response(prompt):
+    async for token in stream_response(prompt):
         full_response.append(token)
         yield token
         
