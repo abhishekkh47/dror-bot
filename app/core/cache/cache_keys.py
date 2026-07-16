@@ -2,17 +2,16 @@ import hashlib
 
 
 def build_response_cache_key(
-    query,
-    step,
+    query: str,
+    history_text: str,
 ):
     """
-    Build deterministic response cache key.
+    Build deterministic response cache key for QA pipeline.
     """
 
     raw = (
         f"{query}|"
-        f"{step.id}|"
-        f"{step.rag_topic}"
+        f"{history_text}"
     )
 
     hashed = hashlib.md5(

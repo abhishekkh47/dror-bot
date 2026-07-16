@@ -16,6 +16,9 @@ from app.core.types import QueryResponse, SourceCitation
 from app.core.session_store import SessionStore
 import time
 import logging
+import asyncio
+from app.core.cache.response_cache import get_cached_response, save_cached_response
+from app.core.cache.cache_keys import build_response_cache_key
 
 logger = logging.getLogger("drorbot.telemetry")
 logger.setLevel(logging.INFO)
@@ -93,6 +96,20 @@ async def answer_query(query: str, session_id: str = None, session_store: Sessio
             history_text = "\n".join(session.history[-6:])
 
     search_query = query
+    cache_key = build_response_cache_key(query, history_text)
+    cached_payload = await get_cached_response(cache_key)
+    if cached_payload:
+        latency = time.time() - start_time
+        logger.info(f"[TELEMETRY] type=qa_response | mode=cached | latency={latency:.2f}s | confidence={cached_payload.get('confidence', 0.0):.2f}")
+        return QueryResponse(
+            answer=cached_payload["answer"],
+            domain=cached_payload.get("domain", "unknown"),
+            mode="cached",
+            session_id=session_id or "",
+            confidence=cached_payload.get("confidence", 1.0),
+            citations=cached_payload.get("citations", [])
+        )
+
     if session and session.history:
         reformulated = generate_response(REFORMULATE_PROMPT.format(history=history_text, query=query)).strip()
         search_query = reformulated if reformulated else query
@@ -172,6 +189,16 @@ async def answer_query(query: str, session_id: str = None, session_store: Sessio
 
     latency = time.time() - start_time
     logger.info(f"[TELEMETRY] type=qa_response | mode=answered | latency={latency:.2f}s | confidence={confidence:.2f} | domain={domain}")
+
+    # Save to cache
+    payload_to_cache = {
+        "answer": response.strip(),
+        "domain": domain,
+        "confidence": confidence,
+        "citations": citations
+    }
+    # Fire and forget the cache save so we don't block returning
+    asyncio.create_task(save_cached_response(cache_key, payload_to_cache))
 
     return QueryResponse(
         answer=response.strip(),
@@ -256,6 +283,32 @@ async def stream_query(query: str, session_id: str = None, session_store: Sessio
     as a single chunk so the client always receives something.
     """
     start_time = time.time()
+    
+    history_text = "No previous conversation."
+    if session_store and session_id:
+        try:
+            session = session_store.get(session_id)
+            if session.history:
+                history_text = "\n".join(session.history[-6:])
+        except Exception:
+            pass
+
+    cache_key = build_response_cache_key(query, history_text)
+    cached_payload = await get_cached_response(cache_key)
+    
+    if cached_payload:
+        latency = time.time() - start_time
+        logger.info(f"[TELEMETRY] type=qa_stream | mode=cached | latency={latency:.2f}s | confidence={cached_payload.get('confidence', 0.0):.2f}")
+        
+        # Simulate stream by chunking words
+        import re
+        tokens = re.split(r'(\s+)', cached_payload["answer"])
+        for token in tokens:
+            if token:
+                yield token
+                await asyncio.sleep(0.01)
+        return
+
     error, prompt, confidence, session = _build_qa_prompt(query, session_id, session_store)
     if error:
         yield error
@@ -266,10 +319,21 @@ async def stream_query(query: str, session_id: str = None, session_store: Sessio
         full_response.append(token)
         yield token
         
+    final_answer = ''.join(full_response).strip()
+    
     if session and session_store:
         session.history.append(f"User: {query}")
-        session.history.append(f"Assistant: {''.join(full_response).strip()}")
+        session.history.append(f"Assistant: {final_answer}")
         session_store.update(session)
+        
+    # Save to cache
+    payload_to_cache = {
+        "answer": final_answer,
+        "domain": "unknown",
+        "confidence": confidence,
+        "citations": []
+    }
+    asyncio.create_task(save_cached_response(cache_key, payload_to_cache))
         
     latency = time.time() - start_time
     logger.info(f"[TELEMETRY] type=qa_stream | mode=answered | latency={latency:.2f}s | confidence={confidence:.2f}")

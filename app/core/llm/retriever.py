@@ -1,4 +1,3 @@
-import os
 from app.core.llm.vector_store import VectorStore
 
 KNOWLEDGE_FILES = [

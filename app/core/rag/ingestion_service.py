@@ -2,7 +2,6 @@ import json
 import os
 from pathlib import Path
 from langchain_text_splitters import MarkdownHeaderTextSplitter
-from app.core.llm.llm import generate_response
 
 METADATA_PROMPT = """Analyze the following documentation chunk and generate JSON metadata.
 Extract:
